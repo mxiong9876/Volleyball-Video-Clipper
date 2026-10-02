@@ -1,7 +1,20 @@
-data/
+# Data: only eval labels are committed; raw media stays local
+data/*
+!data/labels/
+
+# Secrets
 .env
-node_modules/
-__pycache__/
+
+# Media
 *.mp4
 *.wav
 
+# Python
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
