@@ -9,6 +9,7 @@ dependencies = [
     "sqlalchemy",
     "psycopg[binary]",
     "redis",
+    "volley-pipeline",
 ]
 
 [dependency-groups]
@@ -20,6 +21,9 @@ dev = [
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+volley-pipeline = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

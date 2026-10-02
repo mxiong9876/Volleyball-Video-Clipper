@@ -12,7 +12,8 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
             OpenCV, PaddleOCR). No web imports. Every stage runnable from CLI.
 
 ## Stack (approved tooling, in addition to the above)
-- uv: Python 3.11 + venvs (api/ and pipeline/ each have pyproject.toml + uv.lock)
+- uv workspace: root pyproject.toml lists api/ + pipeline/; one uv.lock and .venv at
+  the root. api depends on volley-pipeline (workspace source). Python 3.11
 - api runtime: uvicorn, psycopg[binary] (Postgres driver), redis
 - Python dev group (`[dependency-groups] dev`): pytest, ruff, httpx2 (api only;
   Starlette's TestClient deprecated plain httpx)
@@ -20,7 +21,7 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 
 ## Commands
 (Claude: keep this section updated as commands are created)
-- `make install` - uv sync api/ + pipeline/, npm install web/
+- `make install` - `uv sync --all-packages` (whole workspace), npm install web/
 - `make up` / `make down` - start/stop Postgres + Redis (docker compose)
 - `make dev` - `up`, then API on :8000 (reload) + Vite on :5173; Ctrl-C stops both
 - `make test` - pytest in pipeline/ and api/

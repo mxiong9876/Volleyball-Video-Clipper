@@ -1,8 +1,7 @@
 .PHONY: install up down dev test lint
 
 install:
-	cd api && uv sync
-	cd pipeline && uv sync
+	uv sync --all-packages
 	cd web && npm install
 
 up:
