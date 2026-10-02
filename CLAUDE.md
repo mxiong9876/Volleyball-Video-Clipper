@@ -39,5 +39,7 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
   data/labels/ and report precision/recall before and after.
 - Ask before adding a dependency not listed above.
 - Commit after each working step with a clear message.
+- When you add, move, or delete a file in api/, pipeline/, or web/src/, update
+  .claude/skills/project-map/SKILL.md in the same commit.
 - Never modify or delete an existing test to make it pass. If a test
   seems wrong, stop and tell me why.
