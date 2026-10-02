@@ -12,7 +12,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "ruff", "httpx"]
+dev = [
+    "httpx2>=2.13.1",
+    "pytest",
+    "ruff",
+]
 
 [tool.uv]
 package = false

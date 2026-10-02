@@ -14,7 +14,8 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 ## Stack (approved tooling, in addition to the above)
 - uv: Python 3.11 + venvs (api/ and pipeline/ each have pyproject.toml + uv.lock)
 - api runtime: uvicorn, psycopg[binary] (Postgres driver), redis
-- Python dev group (`[dependency-groups] dev`): pytest, ruff, httpx
+- Python dev group (`[dependency-groups] dev`): pytest, ruff, httpx2 (api only;
+  Starlette's TestClient deprecated plain httpx)
 - web lint: oxlint (Vite template default)
 
 ## Commands
