@@ -24,7 +24,17 @@ AUDIO_SAMPLE_RATE = 22050
 VIDEO_FILENAME = "video.mp4"
 AUDIO_FILENAME = "audio.wav"
 # 720p is plenty for motion energy and scoreboard OCR, and keeps files small.
-VIDEO_FORMAT = "bv*[height<=720]+ba/b[height<=720]/b"
+# Prefer H.264 (avc1): every OpenCV/ffmpeg build decodes it, unlike AV1. Fall back to
+# other codecs only when YouTube has no H.264 stream at <=720p.
+VIDEO_FORMAT = "/".join(
+    [
+        "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]",
+        "bv*[height<=720][vcodec^=avc1]+ba",
+        "bv*[height<=720]+ba",
+        "b[height<=720]",
+        "b",
+    ]
+)
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _YOUTUBE_HOSTS = {"youtube.com", "m.youtube.com", "music.youtube.com"}

@@ -238,6 +238,54 @@ def test_download_video_missing_output(fake_ydl, tmp_path):
         ingest.download_video(URL, tmp_path)
 
 
+# --- VIDEO_FORMAT (yt-dlp's real format selector, fake format list) ---------
+
+
+def fmt(fid, ext, vcodec, acodec="none", height=None, tbr=1000):
+    return {
+        "format_id": fid, "ext": ext, "vcodec": vcodec, "acodec": acodec,
+        "height": height, "tbr": tbr, "url": f"https://x/{fid}", "protocol": "https",
+    }  # fmt: skip
+
+
+def select(formats):
+    """Run the real selector. Like yt-dlp's own sorted lists, `formats` is worst -> best."""
+    selector = yt_dlp.YoutubeDL({"quiet": True}).build_format_selector(ingest.VIDEO_FORMAT)
+    ctx = {"formats": formats, "incomplete_formats": False, "has_merged_format": False}
+    return [f["format_id"] for f in selector(ctx)]
+
+
+AUDIO = [
+    fmt("140", "m4a", "none", "mp4a.40.2", tbr=128),
+    fmt("251", "webm", "none", "opus", tbr=160),
+]
+AV1_720 = fmt("398", "mp4", "av01.0.05M.08", height=720, tbr=1500)
+VP9_720 = fmt("247", "webm", "vp9", height=720, tbr=1800)
+H264_720 = fmt("136", "mp4", "avc1.4d401f", height=720, tbr=900)
+H264_1080 = fmt("137", "mp4", "avc1.640028", height=1080, tbr=4000)
+
+
+# Ordered the way YouTube ranks them: H.264 below VP9 below AV1, opus above m4a.
+
+
+def test_format_prefers_h264_over_better_ranked_av1_and_vp9():
+    assert select([*AUDIO, H264_720, VP9_720, AV1_720, H264_1080]) == ["136+140"]
+
+
+def test_format_h264_with_non_m4a_audio():
+    assert select([AUDIO[1], H264_720, AV1_720]) == ["136+251"]
+
+
+def test_format_falls_back_when_no_h264_at_720p():
+    # The only H.264 stream is 1080p, so take the best <=720p of any codec.
+    assert select([*AUDIO, VP9_720, AV1_720, H264_1080]) == ["398+251"]
+
+
+def test_format_single_file_fallback():
+    combined = fmt("18", "mp4", "avc1.42001E", "mp4a.40.2", height=360, tbr=500)
+    assert select([combined]) == ["18"]
+
+
 # --- extract_audio (real ffmpeg on a generated clip) -------------------------
 
 
