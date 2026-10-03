@@ -36,7 +36,11 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 ## pipeline/ (pure-Python analysis, no web imports)
 - `pipeline/pyproject.toml` - hatchling package `volley_pipeline`
 - `pipeline/volley_pipeline/__init__.py` - package root, `__version__`
+- `pipeline/volley_pipeline/ingest.py` - `parse_youtube_id` (no network), `fetch_metadata`,
+  `check_duration` (3h cap), `download_video` (-> video.mp4, cleans partials),
+  `extract_audio` (ffmpeg -> mono 22050 Hz WAV), `IngestError` subclasses; CLI `python -m`
 - `pipeline/tests/test_smoke.py` - import smoke test
+- `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 
 ## web/ (React + Vite + TS + Tailwind + TanStack Query)
 - `web/src/main.tsx` - React root, QueryClientProvider

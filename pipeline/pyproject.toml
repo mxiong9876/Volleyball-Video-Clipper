@@ -3,7 +3,9 @@ name = "volley-pipeline"
 version = "0.0.0"
 description = "Pure-Python analysis pipeline for Volley Breakdown"
 requires-python = "==3.11.*"
-dependencies = []
+dependencies = [
+    "yt-dlp>=2026.8.19",
+]
 
 [dependency-groups]
 dev = ["pytest", "ruff"]

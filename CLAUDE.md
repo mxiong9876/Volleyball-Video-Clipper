@@ -21,6 +21,7 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 
 ## Commands
 (Claude: keep this section updated as commands are created)
+- Prereq: ffmpeg on PATH (`brew install ffmpeg`); used by yt-dlp and the audio stage/tests
 - `make install` - `uv sync --all-packages` (whole workspace), npm install web/
 - `make up` / `make down` - start/stop Postgres + Redis (docker compose)
 - `make migrate` - `alembic upgrade head` on the dev DB (run after `make up`, on schema changes)
@@ -30,6 +31,8 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - `make test` - pytest in pipeline/ and api/ (api/tests/test_migrations.py needs
   `make up`; it uses a separate `volley_test` DB and skips if Postgres is down)
 - `make lint` - ruff check + format check (Python), oxlint + tsc (web)
+- Ingest CLI: `cd pipeline && uv run python -m volley_pipeline.ingest <url> --out ../data/raw`
+  (writes data/raw/<youtube_id>/video.mp4 + audio.wav)
 - Single test: `cd api && uv run pytest tests/test_health.py::test_health_ok`
 - Env: copy `.env.example` → `.env` (api) and `web/.env.example` → `web/.env`
   (Vite only reads web/; VITE_API_URL defaults to http://localhost:8000)
