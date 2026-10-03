@@ -23,9 +23,15 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 ## api/ (FastAPI, not packaged)
 - `api/pyproject.toml` - deps, dev group (pytest, ruff, httpx2), ruff/pytest config
 - `api/app/main.py` - FastAPI app, CORS, `/health` (checks Postgres + Redis, 503 if down)
+- `api/app/db.py` - SQLAlchemy `Base`, cached `get_engine()`, `SessionLocal()`, `get_session` dependency
+- `api/app/models.py` - `Video` (unique youtube_id), `AnalysisJob` (table analysis_jobs),
+  `JobStatus` StrEnum (VARCHAR + CHECK constraint, not a PG enum), `TERMINAL_STATUSES`
+- `api/alembic.ini`, `api/migrations/env.py` - Alembic; URL from app.config unless set explicitly
+- `api/migrations/versions/` - migrations (`0001` = videos + analysis_jobs)
 - `api/app/config.py` - env-driven settings (DATABASE_URL, REDIS_URL, CORS_ORIGINS)
 - `api/tests/test_health.py` - /health ok + degraded cases (checks monkeypatched)
 - `api/tests/test_pipeline_import.py` - proves api can import volley_pipeline
+- `api/tests/test_migrations.py` - upgrade/downgrade on Postgres DB `volley_test` (skips if down)
 
 ## pipeline/ (pure-Python analysis, no web imports)
 - `pipeline/pyproject.toml` - hatchling package `volley_pipeline`
@@ -49,6 +55,7 @@ Postgres → web fetches them for the momentum chart and rally playback.
 ## Commands
 - `make install` - `uv sync --all-packages` + `npm install` in web/
 - `make up` / `make down` - start/stop Postgres + Redis
+- `make migrate` - alembic upgrade head on the dev DB
 - `make dev` - up, then API :8000 (reload) + Vite :5173
 - `make test` - pytest in pipeline/ and api/
 - `make lint` - ruff check/format (Python), oxlint + tsc (web)

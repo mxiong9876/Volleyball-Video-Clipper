@@ -1,4 +1,4 @@
-.PHONY: install up down dev test lint
+.PHONY: install up down migrate dev test lint
 
 install:
 	uv sync --all-packages
@@ -9,6 +9,10 @@ up:
 
 down:
 	docker compose down
+
+# Apply Alembic migrations to the dev database.
+migrate: up
+	cd api && uv run alembic upgrade head
 
 # Postgres + Redis in Docker; API and web on the host with hot reload. Ctrl-C stops both.
 dev: up

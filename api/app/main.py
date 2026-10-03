@@ -1,11 +1,10 @@
-from functools import lru_cache
-
 import redis
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import text
 
 from app import config
+from app.db import get_engine
 
 app = FastAPI(title="Volley Breakdown API")
 app.add_middleware(
@@ -14,15 +13,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@lru_cache
-def get_engine() -> Engine:
-    return create_engine(
-        config.DATABASE_URL,
-        pool_pre_ping=True,
-        connect_args={"connect_timeout": config.HEALTH_TIMEOUT},
-    )
 
 
 def check_db() -> bool:

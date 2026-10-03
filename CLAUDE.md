@@ -14,7 +14,7 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 ## Stack (approved tooling, in addition to the above)
 - uv workspace: root pyproject.toml lists api/ + pipeline/; one uv.lock and .venv at
   the root. api depends on volley-pipeline (workspace source). Python 3.11
-- api runtime: uvicorn, psycopg[binary] (Postgres driver), redis
+- api runtime: uvicorn, psycopg[binary] (Postgres driver), redis, alembic, rq
 - Python dev group (`[dependency-groups] dev`): pytest, ruff, httpx2 (api only;
   Starlette's TestClient deprecated plain httpx)
 - web lint: oxlint (Vite template default)
@@ -23,8 +23,12 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 (Claude: keep this section updated as commands are created)
 - `make install` - `uv sync --all-packages` (whole workspace), npm install web/
 - `make up` / `make down` - start/stop Postgres + Redis (docker compose)
+- `make migrate` - `alembic upgrade head` on the dev DB (run after `make up`, on schema changes)
+- New migration: `cd api && uv run alembic revision --autogenerate -m "..."`
+  (models in api/app/models.py; review the generated file before committing)
 - `make dev` - `up`, then API on :8000 (reload) + Vite on :5173; Ctrl-C stops both
-- `make test` - pytest in pipeline/ and api/
+- `make test` - pytest in pipeline/ and api/ (api/tests/test_migrations.py needs
+  `make up`; it uses a separate `volley_test` DB and skips if Postgres is down)
 - `make lint` - ruff check + format check (Python), oxlint + tsc (web)
 - Single test: `cd api && uv run pytest tests/test_health.py::test_health_ok`
 - Env: copy `.env.example` → `.env` (api) and `web/.env.example` → `web/.env`
