@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from app import config
 from app.db import get_engine
+from app.routes import jobs, videos
 
 app = FastAPI(title="Volley Breakdown API")
 app.add_middleware(
@@ -13,6 +14,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(videos.router)
+app.include_router(jobs.router)
 
 
 def check_db() -> bool:

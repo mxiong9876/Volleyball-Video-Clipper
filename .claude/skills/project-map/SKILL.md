@@ -23,15 +23,29 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 ## api/ (FastAPI, not packaged)
 - `api/pyproject.toml` - deps, dev group (pytest, ruff, httpx2), ruff/pytest config
 - `api/app/main.py` - FastAPI app, CORS, `/health` (checks Postgres + Redis, 503 if down)
-- `api/app/db.py` - SQLAlchemy `Base`, cached `get_engine()`, `SessionLocal()`, `get_session` dependency
+- `api/app/db.py` - SQLAlchemy `Base`, cached `get_engine()`, `SessionLocal()`, `get_session`/`SessionDep`
 - `api/app/models.py` - `Video` (unique youtube_id), `AnalysisJob` (table analysis_jobs),
-  `JobStatus` StrEnum (VARCHAR + CHECK constraint, not a PG enum), `TERMINAL_STATUSES`
+  `JobStatus` StrEnum (VARCHAR + CHECK constraint, not a PG enum), `TERMINAL_STATUSES`,
+  `UTCDateTime` (timestamps always read back tz-aware)
 - `api/alembic.ini`, `api/migrations/env.py` - Alembic; URL from app.config unless set explicitly
 - `api/migrations/versions/` - migrations (`0001` = videos + analysis_jobs)
-- `api/app/config.py` - env-driven settings (DATABASE_URL, REDIS_URL, CORS_ORIGINS)
+- `api/app/config.py` - env-driven settings (DATABASE_URL, REDIS_URL, CORS_ORIGINS, DATA_DIR)
+  plus limits: MAX_DURATION_SEC (3h), METADATA_TIMEOUT, QUEUE_NAME, INGEST_JOB_TIMEOUT
+- `api/app/queue.py` - Redis/RQ queue, `enqueue_ingest` (RQ id `ingest-<job_id>`),
+  worker heartbeat key (30s TTL), `rq_job_is_live` (waiting, or started on a worker whose
+  heartbeat is fresh; RQ's own worker registry outlives a kill -9 by hours)
+- `api/app/tasks.py` - `ingest_video(job_id)` (calls volley_pipeline.ingest, updates status/
+  progress), `fail_stale_jobs`, `mark_failed`
+- `api/app/routes/videos.py` - POST /videos: parse id -> reuse/retry existing -> lookup (deadline)
+  -> 3h check -> insert + enqueue. 202 new, 200 existing, 422 bad/unavailable/too long, 503, 504
+- `api/app/routes/jobs.py` - GET /jobs/{id} (`JobOut`), 404 if missing
+- `api/worker.py` - RQ SimpleWorker entry point; runs `fail_stale_jobs` first, heartbeat thread
 - `api/tests/test_health.py` - /health ok + degraded cases (checks monkeypatched)
 - `api/tests/test_pipeline_import.py` - proves api can import volley_pipeline
 - `api/tests/test_migrations.py` - upgrade/downgrade on Postgres DB `volley_test` (skips if down)
+- `api/tests/conftest.py` - in-memory SQLite fixtures (`session`, `client`), `add_video` helper
+- `api/tests/test_videos.py`, `test_jobs.py`, `test_tasks.py`, `test_queue.py` - endpoints,
+  task status flow + stale-job recovery, RQ liveness (lookup/enqueue/RQ all faked)
 
 ## pipeline/ (pure-Python analysis, no web imports)
 - `pipeline/pyproject.toml` - hatchling package `volley_pipeline`
@@ -51,15 +65,17 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `web/.env.example` - VITE_API_URL (Vite reads env only from web/)
 - `web/.oxlintrc.json` - oxlint config
 
-## Data flow (planned, per BLUEPRINT; only /health exists today)
-User pastes a YouTube URL in web → api creates a job and enqueues it on Redis (RQ)
-→ worker runs volley_pipeline stages (download, rallies, OCR) → results saved to
-Postgres → web fetches them for the momentum chart and rally playback.
+## Data flow
+Built (Phase 1): POST /videos → api validates + looks up metadata → inserts videos +
+analysis_jobs row → enqueues on Redis (RQ) → worker runs volley_pipeline.ingest (download
+→ data/raw/<youtube_id>/video.mp4, audio.wav) and updates status/progress → GET /jobs/{id}.
+Planned: rally segmentation, OCR, results in Postgres → web momentum chart + playback.
 
 ## Commands
 - `make install` - `uv sync --all-packages` + `npm install` in web/
 - `make up` / `make down` - start/stop Postgres + Redis
 - `make migrate` - alembic upgrade head on the dev DB
-- `make dev` - up, then API :8000 (reload) + Vite :5173
+- `make worker` - RQ ingest worker (also started by `make dev`)
+- `make dev` - up, then API :8000 (reload) + worker + Vite :5173
 - `make test` - pytest in pipeline/ and api/
 - `make lint` - ruff check/format (Python), oxlint + tsc (web)

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -9,6 +9,18 @@ from app.db import Base
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+class UTCDateTime(TypeDecorator):
+    """timestamptz that always reads back as an aware UTC datetime (SQLite in tests drops tz)."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value
 
 
 class JobStatus(StrEnum):
@@ -29,7 +41,7 @@ class Video(Base):
     youtube_id: Mapped[str] = mapped_column(String(11), unique=True)
     title: Mapped[str] = mapped_column(Text)
     duration_sec: Mapped[int]
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     jobs: Mapped[list["AnalysisJob"]] = relationship(
         back_populates="video", order_by="AnalysisJob.id"
@@ -52,8 +64,8 @@ class AnalysisJob(Base):
     progress_pct: Mapped[int] = mapped_column(default=0)
     pipeline_version: Mapped[str] = mapped_column(String(32))
     error_msg: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     video: Mapped[Video] = relationship(back_populates="jobs")

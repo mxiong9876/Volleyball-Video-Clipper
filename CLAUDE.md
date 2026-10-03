@@ -27,7 +27,10 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - `make migrate` - `alembic upgrade head` on the dev DB (run after `make up`, on schema changes)
 - New migration: `cd api && uv run alembic revision --autogenerate -m "..."`
   (models in api/app/models.py; review the generated file before committing)
-- `make dev` - `up`, then API on :8000 (reload) + Vite on :5173; Ctrl-C stops both
+- `make worker` - RQ worker (api/worker.py, queue "ingest"); on startup fails jobs a
+  previous worker left mid-processing
+- `make dev` - `up`, then API on :8000 (reload) + worker + Vite on :5173; Ctrl-C stops all
+  (the worker doesn't hot-reload: restart `make dev` after changing tasks/pipeline code)
 - `make test` - pytest in pipeline/ and api/ (api/tests/test_migrations.py needs
   `make up`; it uses a separate `volley_test` DB and skips if Postgres is down)
 - `make lint` - ruff check + format check (Python), oxlint + tsc (web)
@@ -37,6 +40,8 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - Env: copy `.env.example` → `.env` (api) and `web/.env.example` → `web/.env`
   (Vite only reads web/; VITE_API_URL defaults to http://localhost:8000)
 - Health: `curl -i localhost:8000/health` (200 ok, 503 if db or redis down)
+- Submit: `curl -X POST localhost:8000/videos -H 'content-type: application/json'
+  -d '{"url":"<youtube url>"}'` (202 new, 200 existing), then `curl localhost:8000/jobs/<id>`
 
 ## Rules
 - Only work on the phase I ask for. Don't start later phases.

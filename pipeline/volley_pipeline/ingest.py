@@ -143,7 +143,8 @@ def fetch_metadata(url: str, timeout: float = 10) -> dict:
 
 
 def _fmt_duration(seconds: int) -> str:
-    h, m = divmod(seconds // 60, 60)
+    # Round up so "just over the limit" never prints the same as the limit.
+    h, m = divmod(-(-seconds // 60), 60)
     if not h:
         return f"{m}m"
     return f"{h}h {m:02d}m" if m else f"{h}h"

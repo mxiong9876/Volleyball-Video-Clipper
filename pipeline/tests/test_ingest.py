@@ -151,6 +151,12 @@ def test_check_duration_at_limit_ok():
     ingest.check_duration(3 * 3600)
 
 
+def test_check_duration_one_second_over_reads_differently():
+    with pytest.raises(ingest.VideoTooLongError) as exc_info:
+        ingest.check_duration(3 * 3600 + 1)
+    assert str(exc_info.value) == "Video is 3h 01m long; the limit is 3h"
+
+
 def test_check_duration_over_limit():
     with pytest.raises(ingest.VideoTooLongError) as exc_info:
         ingest.check_duration(3 * 3600 + 12 * 60)

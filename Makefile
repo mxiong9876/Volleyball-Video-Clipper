@@ -1,4 +1,4 @@
-.PHONY: install up down migrate dev test lint
+.PHONY: install up down migrate worker dev test lint
 
 install:
 	uv sync --all-packages
@@ -14,10 +14,15 @@ down:
 migrate: up
 	cd api && uv run alembic upgrade head
 
-# Postgres + Redis in Docker; API and web on the host with hot reload. Ctrl-C stops both.
+# RQ worker for ingest jobs (fails jobs a previous worker left unfinished on startup).
+worker: up
+	cd api && uv run python worker.py
+
+# Postgres + Redis in Docker; API, worker and web on the host. Ctrl-C stops all three.
 dev: up
 	@trap 'kill 0' INT TERM EXIT; \
 	(cd api && uv run uvicorn app.main:app --reload --port 8000) & \
+	(cd api && uv run python worker.py) & \
 	(cd web && npm run dev) & \
 	wait
 
