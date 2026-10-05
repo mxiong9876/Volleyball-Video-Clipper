@@ -56,7 +56,11 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/ingest.py` - `parse_youtube_id` (no network), `fetch_metadata`,
   `check_duration` (3h cap), `download_video` (-> video.mp4, cleans partials),
   `extract_audio` (ffmpeg -> mono 22050 Hz WAV), `IngestError` subclasses; CLI `python -m`
+- `pipeline/volley_pipeline/eval.py` - rally eval: `load_rallies` (labeler JSON), `match_rallies`
+  (max one-to-one match, both boundaries within tolerance, default 1.5s), `score_video` -> `Scores`
+  (tp/fp/fn, P/R/F1, mean signed/abs start+end offsets), `evaluate` (per video + micro overall); CLI
 - `pipeline/tests/test_smoke.py` - import smoke test
+- `pipeline/tests/test_eval.py` - eval tests on hand-made rally lists (tolerance edges, offsets, CLI)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 
 ## web/ (React + Vite + TS + Tailwind + TanStack Query)
