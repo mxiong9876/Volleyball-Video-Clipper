@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rally Labeler</title>
+<style>
+  :root { color-scheme: dark; --bg: #111; --panel: #1b1b1b; --line: #333; --fg: #eee;
+          --muted: #999; --accent: #4ea1ff; --ok: #4caf50; --warn: #ffb74d; --err: #ef5350; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 system-ui, -apple-system, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px;
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  button, select { background: #2a2a2a; color: var(--fg); border: 1px solid var(--line);
+                   border-radius: 4px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button:disabled, select:disabled { opacity: .5; cursor: default; }
+  #saveState { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: calc(100vh - 53px); }
+  #left { padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  video { width: 100%; max-height: calc(100vh - 140px); background: #000; }
+  #status { display: flex; gap: 20px; font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+  #msg { min-height: 1.4em; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex;
+          flex-direction: column; min-height: 0; }
+  aside section { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+             margin: 0 0 6px; }
+  #keys { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
+  kbd { background: #2a2a2a; border: 1px solid #444; border-radius: 3px; padding: 0 4px;
+        font: 12px ui-monospace, monospace; }
+  #listWrap { overflow-y: auto; flex: 1; padding: 0; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 4px 8px; text-align: right; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 500;
+       border-bottom: 1px solid var(--line); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #262626; }
+  tbody tr.current { background: #1e3350; }
+  td.del button { padding: 0 6px; }
+  #empty { color: var(--muted); padding: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rally Labeler</h1>
+  <button id="openBtn">Open data folder…</button>
+  <select id="videoSelect" disabled><option>— no folder —</option></select>
+  <button id="saveBtn" disabled>Save</button>
+  <span id="saveState"></span>
+</header>
+<main>
+  <div id="left">
+    <video id="video" controls preload="auto"></video>
+    <div id="status">
+      <span>time <b id="tNow">0:00.00</b> / <span id="tDur">0:00.00</span></span>
+      <span>speed <b id="speed">1x</b></span>
+      <span>pending start <b id="pending">—</b></span>
+    </div>
+    <div id="msg"></div>
+  </div>
+  <aside>
+    <section>
+      <h2>Keys</h2>
+      <div id="keys">
+        <kbd>S</kbd><span>rally start (again = replace)</span>
+        <kbd>E</kbd><span>rally end</span>
+        <kbd>Z</kbd><span>undo</span>
+        <kbd>← →</kbd><span>seek 2 s</span>
+        <kbd>⇧ ← →</kbd><span>seek 0.5 s</span>
+        <kbd>1</kbd><span>speed 1x</span>
+        <kbd>2</kbd><span>speed 2x</span>
+        <kbd>Space</kbd><span>play / pause</span>
+      </div>
+    </section>
+    <section><h2 id="countLabel">Rallies (0)</h2></section>
+    <div id="listWrap">
+      <table>
+        <thead><tr><th>#</th><th>start</th><th>end</th><th>dur</th><th></th></tr></thead>
+        <tbody id="list"></tbody>
+      </table>
+      <div id="empty">No rallies yet.</div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+
+const state = {
+  dataDir: null,      // FileSystemDirectoryHandle for data/
+  videoDirs: {},      // youtube id -> FileSystemDirectoryHandle (data/raw/<id>)
+  id: null,           // current youtube id
+  rallies: [],        // [{start, end}] sorted by start, seconds rounded to 0.01
+  pending: null,      // pending start (seconds) or null
+  undo: [],           // snapshots of {rallies, pending}
+  canSave: false,     // false if the existing label file failed to parse (never clobber it)
+  dirty: false,
+  objectUrl: null,
+};
+
+// ---------- helpers ----------
+
+const round2 = (t) => Math.round(t * 100) / 100;
+
+function fmt(t) {
+  if (t == null || !isFinite(t)) return "—";
+  const m = Math.floor(t / 60);
+  const s = (t - m * 60).toFixed(2).padStart(5, "0");
+  return `${m}:${s}`;
+}
+
+let msgTimer = null;
+function say(text, cls = "") {
+  const el = $("msg");
+  el.textContent = text;
+  el.className = cls;
+  clearTimeout(msgTimer);
+  if (text) msgTimer = setTimeout(() => (el.textContent = ""), 4000);
+}
+
+function setSaveState(text, cls) {
+  $("saveState").textContent = text;
+  $("saveState").className = cls;
+}
+
+// ---------- folder + video loading ----------
+
+$("openBtn").addEventListener("click", async () => {
+  if (!window.showDirectoryPicker) {
+    say("This browser lacks the File System Access API. Use Chrome or Edge.", "err");
+    return;
+  }
+  let dir;
+  try {
+    dir = await window.showDirectoryPicker({ id: "volley-data", mode: "readwrite" });
+  } catch (e) {
+    if (e.name !== "AbortError") say(`Could not open folder: ${e.message}`, "err");
+    return;
+  }
+  // Accept either data/ itself or the repo root that contains it.
+  if (dir.name !== "data") {
+    try { dir = await dir.getDirectoryHandle("data"); } catch { /* keep as is */ }
+  }
+  let raw;
+  try {
+    raw = await dir.getDirectoryHandle("raw");
+  } catch {
+    say(`"${dir.name}" has no raw/ subfolder. Pick the repo's data/ folder.`, "err");
+    return;
+  }
+  const dirs = {};
+  for await (const [name, handle] of raw.entries()) {
+    if (handle.kind !== "directory") continue;
+    try { await handle.getFileHandle("video.mp4"); dirs[name] = handle; } catch { /* no video */ }
+  }
+  const ids = Object.keys(dirs).sort();
+  if (!ids.length) { say("No raw/<id>/video.mp4 found.", "err"); return; }
+  state.dataDir = dir;
+  state.videoDirs = dirs;
+  const sel = $("videoSelect");
+  sel.innerHTML = '<option value="">— choose video —</option>' +
+    ids.map((id) => `<option value="${id}">${id}</option>`).join("");
+  sel.disabled = false;
+  if (ids.length === 1) { sel.value = ids[0]; loadVideo(ids[0]); }
+  else say(`Found ${ids.length} videos. Choose one.`);
+});
+
+$("videoSelect").addEventListener("change", (e) => {
+  e.target.blur();  // keep arrow keys for seeking, not for the dropdown
+  if (e.target.value) loadVideo(e.target.value);
+});
+
+async function labelsDir() {
+  return state.dataDir.getDirectoryHandle("labels", { create: true });
+}
+
+async function loadVideo(id) {
+  const file = await (await state.videoDirs[id].getFileHandle("video.mp4")).getFile();
+  if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+  state.objectUrl = URL.createObjectURL(file);
+
+  state.id = id;
+  state.rallies = [];
+  state.pending = null;
+  state.undo = [];
+  state.dirty = false;
+  state.canSave = true;
+
+  let text = null;
+  try {
+    const fh = await (await labelsDir()).getFileHandle(`${id}.json`);
+    text = await (await fh.getFile()).text();
+  } catch (e) {
+    if (e.name !== "NotFoundError") { say(`Could not read labels: ${e.message}`, "err"); }
+  }
+  if (text !== null) {
+    try {
+      state.rallies = parseLabels(text);
+    } catch (e) {
+      state.canSave = false;
+      say(`labels/${id}.json is invalid (${e.message}). Saving disabled so it isn't overwritten.`,
+          "err");
+    }
+  }
+
+  video.src = state.objectUrl;
+  video.playbackRate = 1;
+  video.addEventListener("loadedmetadata", () => {
+    const last = state.rallies[state.rallies.length - 1];
+    if (last) video.currentTime = Math.min(last.end, video.duration || last.end);
+  }, { once: true });
+
+  $("saveBtn").disabled = !state.canSave;
+  if (state.canSave) {
+    setSaveState(text === null ? "new file" : `loaded ${state.rallies.length} rallies`, "ok");
+  } else {
+    setSaveState("saving disabled", "err");
+  }
+  render();
+}
+
+function parseLabels(text) {
+  const data = JSON.parse(text);
+  if (!Array.isArray(data)) throw new Error("not a list");
+  const out = data.map((r, i) => {
+    const start = r?.start_sec, end = r?.end_sec;
+    if (typeof start !== "number" || typeof end !== "number" || !(end > start)) {
+      throw new Error(`bad entry #${i + 1}`);
+    }
+    return { start, end };
+  });
+  return out.sort((a, b) => a.start - b.start);
+}
+
+// ---------- saving (serialized so writes never interleave) ----------
+
+let saveChain = Promise.resolve();
+
+function save() {
+  if (!state.id || !state.canSave) return;
+  const id = state.id;
+  const body = JSON.stringify(
+    state.rallies.map((r) => ({ start_sec: r.start, end_sec: r.end })), null, 2) + "\n";
+  setSaveState("saving…", "warn");
+  saveChain = saveChain.then(async () => {
+    try {
+      const fh = await (await labelsDir()).getFileHandle(`${id}.json`, { create: true });
+      const w = await fh.createWritable();
+      await w.write(body);
+      await w.close();
+      if (id === state.id) { state.dirty = false; setSaveState(`saved ✓ labels/${id}.json`, "ok"); }
+    } catch (e) {
+      setSaveState("save failed", "err");
+      say(`Save failed: ${e.message}`, "err");
+    }
+  });
+}
+
+$("saveBtn").addEventListener("click", (e) => { e.currentTarget.blur(); save(); });
+
+window.addEventListener("beforeunload", (e) => { if (state.dirty) e.preventDefault(); });
+
+// ---------- editing ----------
+
+function snapshot() {
+  state.undo.push({ rallies: state.rallies.map((r) => ({ ...r })), pending: state.pending });
+}
+
+function changed(savesFile) {
+  if (savesFile) { state.dirty = true; save(); }
+  render();
+}
+
+function markStart() {
+  snapshot();
+  state.pending = round2(video.currentTime);
+  changed(false);
+}
+
+function markEnd() {
+  if (state.pending == null) { say("Press S to mark a start first.", "warn"); return; }
+  const start = state.pending, end = round2(video.currentTime);
+  if (!(end > start)) { say(`End ${fmt(end)} must be after start ${fmt(start)}.`, "warn"); return; }
+  const clash = state.rallies.find((r) => start < r.end && end > r.start);
+  if (clash) {
+    say(`Overlaps rally ${fmt(clash.start)}–${fmt(clash.end)}. Not added.`, "warn");
+    return;
+  }
+  snapshot();
+  state.rallies.push({ start, end });
+  state.rallies.sort((a, b) => a.start - b.start);
+  state.pending = null;
+  say(`Rally ${fmt(start)}–${fmt(end)} added.`, "ok");
+  changed(true);
+}
+
+function undo() {
+  const prev = state.undo.pop();
+  if (!prev) { say("Nothing to undo.", "warn"); return; }
+  const ralliesChanged = JSON.stringify(prev.rallies) !== JSON.stringify(state.rallies);
+  state.rallies = prev.rallies;
+  state.pending = prev.pending;
+  say("Undone.");
+  changed(ralliesChanged);
+}
+
+function deleteRally(i) {
+  snapshot();
+  state.rallies.splice(i, 1);
+  changed(true);
+}
+
+function seek(delta) {
+  const dur = isFinite(video.duration) ? video.duration : Infinity;
+  video.currentTime = Math.max(0, Math.min(dur, video.currentTime + delta));
+}
+
+function setSpeed(rate) {
+  video.playbackRate = rate;
+  render();
+}
+
+// ---------- keys ----------
+
+window.addEventListener("keydown", (e) => {
+  if (!state.id || e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = e.target.tagName;
+  if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
+  const step = e.shiftKey ? 0.5 : 2;
+  const actions = {
+    s: markStart, e: markEnd, z: undo,
+    arrowleft: () => seek(-step), arrowright: () => seek(step),
+    "1": () => setSpeed(1), "2": () => setSpeed(2),
+    " ": () => (video.paused ? video.play() : video.pause()),
+  };
+  const fn = actions[e.key.toLowerCase()];
+  if (!fn) return;
+  e.preventDefault();       // stop the <video> / buttons from also handling the key
+  e.stopPropagation();
+  if (e.repeat && (e.key.toLowerCase() === "s" || e.key.toLowerCase() === "e" ||
+                   e.key.toLowerCase() === "z")) return;
+  fn();
+}, true);
+
+// ---------- rendering ----------
+
+function render() {
+  $("pending").textContent = fmt(state.pending);
+  $("speed").textContent = `${video.playbackRate}x`;
+  $("countLabel").textContent = `Rallies (${state.rallies.length})`;
+  $("empty").style.display = state.rallies.length ? "none" : "block";
+  const tbody = $("list");
+  tbody.innerHTML = "";
+  state.rallies.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${i + 1}</td><td>${fmt(r.start)}</td><td>${fmt(r.end)}</td>` +
+      `<td>${(r.end - r.start).toFixed(1)}s</td><td class="del"><button title="delete">×</button></td>`;
+    tr.addEventListener("click", () => { video.currentTime = r.start; });
+    tr.querySelector("button").addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.currentTarget.blur();
+      deleteRally(i);
+    });
+    tbody.appendChild(tr);
+  });
+  highlightCurrent();
+}
+
+function highlightCurrent() {
+  const t = video.currentTime;
+  [...$("list").children].forEach((tr, i) => {
+    const r = state.rallies[i];
+    tr.classList.toggle("current", t >= r.start && t <= r.end);
+  });
+}
+
+setInterval(() => {
+  $("tNow").textContent = fmt(video.currentTime);
+  $("tDur").textContent = fmt(video.duration);
+  highlightCurrent();
+}, 50);
+video.addEventListener("ratechange", () => { $("speed").textContent = `${video.playbackRate}x`; });
+</script>
+</body>
+</html>

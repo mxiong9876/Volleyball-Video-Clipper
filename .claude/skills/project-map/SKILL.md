@@ -14,6 +14,9 @@ description: Compact map of the Volley Breakdown repo (what each file/folder doe
 - `uv.lock` - single lockfile for the whole Python workspace
 - `.env.example` - DATABASE_URL, REDIS_URL for the api (copy to `.env`)
 - `data/labels/` - committed rally labels for eval; `data/raw/` holds local test media (gitignored)
+- `tools/labeler/index.html` - standalone Chrome page (File System Access API) for hand-labeling
+  rallies (S/E/Z keys); reads data/raw/<id>/video.mp4, autosaves data/labels/<id>.json
+  (`[{start_sec, end_sec}]`). Usage in `tools/labeler/README.md`
 
 ## Python workspace
 api/ and pipeline/ are one uv workspace: root `pyproject.toml`, one root `.venv`
