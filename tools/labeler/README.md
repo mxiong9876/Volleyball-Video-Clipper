@@ -31,13 +31,17 @@ python3 -m http.server 8765 -d tools/labeler   # then open http://localhost:8765
 | --- | --- |
 | `S` | rally start at current time (press again to replace) |
 | `E` | rally end (needs a pending start; rejects end ≤ start and overlaps) |
-| `Z` | undo last change (marks, rally adds, deletes) |
+| `Esc` | deselect the selected rally |
+| `Z` | undo last change (marks, rally adds, retimes, deletes) |
 | `←` / `→` | seek 2 s |
 | `Shift` + `←` / `→` | seek 0.5 s |
 | `1` / `2` | playback speed 1x / 2x |
 | `Space` | play / pause |
 
-Click a rally in the list to seek to its start; `×` deletes it.
+Click a rally in the list to seek to its start and select it; `×` deletes it. While a rally
+is selected (highlighted, and shown as "editing" under the video), `S` / `E` replace *its*
+start / end with the current time instead of marking a new rally (same end ≤ start and overlap
+checks). Press `Esc` to deselect and go back to marking new rallies.
 
 If an existing label file is malformed, the page refuses to save over it. Fix or move the
 file first.

@@ -39,6 +39,7 @@
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: #262626; }
   tbody tr.current { background: #1e3350; }
+  tbody tr.selected { background: #2b4f80; box-shadow: inset 3px 0 var(--accent); }
   td.del button { padding: 0 6px; }
   #empty { color: var(--muted); padding: 12px; }
 </style>
@@ -58,6 +59,7 @@
       <span>time <b id="tNow">0:00.00</b> / <span id="tDur">0:00.00</span></span>
       <span>speed <b id="speed">1x</b></span>
       <span>pending start <b id="pending">—</b></span>
+      <span>editing <b id="editing">—</b></span>
     </div>
     <div id="msg"></div>
   </div>
@@ -67,6 +69,8 @@
       <div id="keys">
         <kbd>S</kbd><span>rally start (again = replace)</span>
         <kbd>E</kbd><span>rally end</span>
+        <kbd>click</kbd><span>select rally: S / E then retime it</span>
+        <kbd>Esc</kbd><span>deselect rally</span>
         <kbd>Z</kbd><span>undo</span>
         <kbd>← →</kbd><span>seek 2 s</span>
         <kbd>⇧ ← →</kbd><span>seek 0.5 s</span>
@@ -97,7 +101,8 @@ const state = {
   id: null,           // current youtube id
   rallies: [],        // [{start, end}] sorted by start, seconds rounded to 0.01
   pending: null,      // pending start (seconds) or null
-  undo: [],           // snapshots of {rallies, pending}
+  selected: null,     // rally object (in rallies) that S / E retime, or null
+  undo: [],           // snapshots of {rallies, pending, selected index}
   canSave: false,     // false if the existing label file failed to parse (never clobber it)
   dirty: false,
   objectUrl: null,
@@ -187,6 +192,7 @@ async function loadVideo(id) {
   state.id = id;
   state.rallies = [];
   state.pending = null;
+  state.selected = null;
   state.undo = [];
   state.dirty = false;
   state.canSave = true;
@@ -268,7 +274,8 @@ window.addEventListener("beforeunload", (e) => { if (state.dirty) e.preventDefau
 // ---------- editing ----------
 
 function snapshot() {
-  state.undo.push({ rallies: state.rallies.map((r) => ({ ...r })), pending: state.pending });
+  state.undo.push({ rallies: state.rallies.map((r) => ({ ...r })), pending: state.pending,
+                    selected: state.rallies.indexOf(state.selected) });
 }
 
 function changed(savesFile) {
@@ -277,12 +284,14 @@ function changed(savesFile) {
 }
 
 function markStart() {
+  if (state.selected) { retimeSelected("start"); return; }
   snapshot();
   state.pending = round2(video.currentTime);
   changed(false);
 }
 
 function markEnd() {
+  if (state.selected) { retimeSelected("end"); return; }
   if (state.pending == null) { say("Press S to mark a start first.", "warn"); return; }
   const start = state.pending, end = round2(video.currentTime);
   if (!(end > start)) { say(`End ${fmt(end)} must be after start ${fmt(start)}.`, "warn"); return; }
@@ -299,18 +308,44 @@ function markEnd() {
   changed(true);
 }
 
+// Replace the selected rally's start or end with the current time.
+function retimeSelected(field) {
+  const r = state.selected, t = round2(video.currentTime);
+  const start = field === "start" ? t : r.start, end = field === "end" ? t : r.end;
+  if (!(end > start)) { say(`End ${fmt(end)} must be after start ${fmt(start)}.`, "warn"); return; }
+  const clash = state.rallies.find((o) => o !== r && start < o.end && end > o.start);
+  if (clash) {
+    say(`Overlaps rally ${fmt(clash.start)}–${fmt(clash.end)}. Not changed.`, "warn");
+    return;
+  }
+  if (start === r.start && end === r.end) return;
+  snapshot();
+  r.start = start;
+  r.end = end;
+  state.rallies.sort((a, b) => a.start - b.start);
+  say(`Rally ${fmt(start)}–${fmt(end)}: ${field} set to ${fmt(t)}.`, "ok");
+  changed(true);
+}
+
+function select(r) {
+  state.selected = r;
+  render();
+}
+
 function undo() {
   const prev = state.undo.pop();
   if (!prev) { say("Nothing to undo.", "warn"); return; }
   const ralliesChanged = JSON.stringify(prev.rallies) !== JSON.stringify(state.rallies);
   state.rallies = prev.rallies;
   state.pending = prev.pending;
+  state.selected = prev.selected >= 0 ? prev.rallies[prev.selected] : null;
   say("Undone.");
   changed(ralliesChanged);
 }
 
 function deleteRally(i) {
   snapshot();
+  if (state.rallies[i] === state.selected) state.selected = null;
   state.rallies.splice(i, 1);
   changed(true);
 }
@@ -333,7 +368,7 @@ window.addEventListener("keydown", (e) => {
   if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
   const step = e.shiftKey ? 0.5 : 2;
   const actions = {
-    s: markStart, e: markEnd, z: undo,
+    s: markStart, e: markEnd, z: undo, escape: () => select(null),
     arrowleft: () => seek(-step), arrowright: () => seek(step),
     "1": () => setSpeed(1), "2": () => setSpeed(2),
     " ": () => (video.paused ? video.play() : video.pause()),
@@ -351,6 +386,8 @@ window.addEventListener("keydown", (e) => {
 
 function render() {
   $("pending").textContent = fmt(state.pending);
+  const sel = state.rallies.indexOf(state.selected);
+  $("editing").textContent = sel >= 0 ? `rally #${sel + 1} (Esc to stop)` : "—";
   $("speed").textContent = `${video.playbackRate}x`;
   $("countLabel").textContent = `Rallies (${state.rallies.length})`;
   $("empty").style.display = state.rallies.length ? "none" : "block";
@@ -360,7 +397,8 @@ function render() {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${i + 1}</td><td>${fmt(r.start)}</td><td>${fmt(r.end)}</td>` +
       `<td>${(r.end - r.start).toFixed(1)}s</td><td class="del"><button title="delete">×</button></td>`;
-    tr.addEventListener("click", () => { video.currentTime = r.start; });
+    tr.classList.toggle("selected", r === state.selected);
+    tr.addEventListener("click", () => { video.currentTime = r.start; select(r); });
     tr.querySelector("button").addEventListener("click", (e) => {
       e.stopPropagation();
       e.currentTarget.blur();
