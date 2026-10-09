@@ -61,10 +61,14 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/eval.py` - rally eval: `load_rallies` (labeler JSON), `match_rallies`
   (max one-to-one match, both boundaries within tolerance, default 1.5s), `score_video` -> `Scores`
   (tp/fp/fn, P/R/F1, mean signed/abs start+end offsets), `evaluate` (per video + micro overall); CLI
+- `pipeline/volley_pipeline/audio.py` - whistle detection: `load_wav` (mono float32),
+  `whistle_activity` (chunked STFT: in-band 2-4 kHz peak-vs-median dB, band energy share),
+  `detect_whistles` -> `Whistle(start_sec, end_sec, peak_hz, strength_db)`, `detect_whistles_in_file`
 - `pipeline/volley_pipeline/videos.py` - `held_out_ids` (parses the Split column of
   docs/videos.md), `default_videos_doc` (data/<x> -> docs/videos.md)
 - `pipeline/tests/test_smoke.py` - import smoke test
 - `pipeline/tests/test_eval.py` - eval tests on hand-made rally lists (tolerance edges, offsets, CLI)
+- `pipeline/tests/test_audio.py` - whistle detection on synthetic tones/trills/noise (no real media)
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 
