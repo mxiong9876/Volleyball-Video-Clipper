@@ -43,6 +43,9 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - Eval: `cd pipeline && uv run python -m volley_pipeline.eval --pred <dir> --labels ../data/labels`
   (`--tolerance 1.5`; pred dir holds <youtube_id>.json in the labeler format; held-out
   videos in docs/videos.md aren't scored unless `--include-held-out`, for the final check)
+- Diagnose: `cd pipeline && uv run python -m volley_pipeline.diagnose --pred ../data/predictions/<run>
+  --labels ../data/labels` (miss buckets per video; run after every detector change)
+- Eval log: append one line to docs/eval-log.md after every detector run (date, run, change, P/R/F1)
 - Labeler: `open -a "Google Chrome" tools/labeler/index.html` → pick data/ (see tools/labeler/README.md)
 - Single test: `cd api && uv run pytest tests/test_health.py::test_health_ok`
 - Env: copy `.env.example` → `.env` (api) and `web/.env.example` → `web/.env`

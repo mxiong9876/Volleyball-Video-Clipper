@@ -10,6 +10,7 @@ description: Compact map of the Volley Breakdown repo (what each file/folder doe
 - `docs/BLUEPRINT.md` - full product spec and development phases
 - `docs/videos.md` - test video table (ID, angle, whistle, Split tune/held-out, label status)
 - `docs/labeling-rules.md` - rally start/end definitions used by the labels
+- `docs/eval-log.md` - one line per detector run (date, run, change, P/R/F1 @ ±1.5s)
 - `Makefile` - install/up/down/dev/test/lint
 - `docker-compose.yml` - Postgres 16 + Redis 7 with healthchecks
 - `pyproject.toml` - uv workspace root (virtual; members: api, pipeline)
@@ -66,6 +67,9 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/audio.py` - whistle detection: `load_wav` (mono float32),
   `whistle_activity` (chunked STFT: in-band 2-4 kHz peak-vs-median dB, band energy share),
   `detect_whistles` -> `Whistle(start_sec, end_sec, peak_hz, strength_db)`, `detect_whistles_in_file`
+- `pipeline/volley_pipeline/diagnose.py` - `diagnose_video`: buckets unmatched labels by nearby
+  detected whistles (no_whistle/serve_missed/end_missed/mispaired/offset_only) and unmatched preds
+  (dead_time/overlap), whistle rate vs chance, serve/end whistle offsets; CLI over a run dir
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
   consecutive whistles); CLI runs every non-held-out data/raw/<id>/audio.wav and writes
   data/predictions/<run>/<id>.json (labels format), <id>.whistles.json, _run.json
@@ -74,6 +78,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/tests/test_smoke.py` - import smoke test
 - `pipeline/tests/test_eval.py` - eval tests on hand-made rally lists (tolerance edges, offsets, CLI)
 - `pipeline/tests/test_audio.py` - whistle detection on synthetic tones/trills/noise (no real media)
+- `pipeline/tests/test_diagnose.py` - diagnose smoke test (CLI + buckets on a tiny hand-made run)
 - `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs (held-out skip)
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
