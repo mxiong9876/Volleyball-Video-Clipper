@@ -6,6 +6,8 @@ the label's. Matching is one-to-one and maximizes the number of matches. Rallies
 Compare a directory of predictions to the labels with:
 
     uv run python -m volley_pipeline.eval --pred <dir> --labels ../data/labels
+
+Videos marked held-out in docs/videos.md are left out of scoring unless --include-held-out.
 """
 
 import argparse
@@ -15,6 +17,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import fmean
+
+from volley_pipeline import videos
 
 Rally = tuple[float, float]
 
@@ -181,13 +185,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pred", required=True, help="dir of predicted <youtube_id>.json")
     parser.add_argument("--labels", default="data/labels", help="dir of labeled <youtube_id>.json")
     parser.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE, help="seconds")
+    parser.add_argument("--videos-doc", help="videos table (default: docs/videos.md)")
+    parser.add_argument(
+        "--include-held-out", action="store_true", help="also score held-out videos"
+    )
     args = parser.parse_args(argv)
 
     pred_dir, label_dir = Path(args.pred), Path(args.labels)
     try:
+        held_out = videos.load_held_out(args.videos_doc, label_dir, args.include_held_out)
         labels = {p.stem: load_rallies(p) for p in sorted(label_dir.glob("*.json"))}
+        excluded = sorted(labels.keys() & held_out)
+        labels = {vid: r for vid, r in labels.items() if vid not in held_out}
         if not labels:
-            raise ValueError(f"no label files in {label_dir}")
+            raise ValueError(f"no label files in {label_dir} (besides held-out)")
         predicted = {
             vid: load_rallies(pred_dir / f"{vid}.json")
             for vid in labels
@@ -203,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     print(f"tolerance ±{args.tolerance:g}s; offsets are pred − label in seconds (+ = late)")
+    if excluded:
+        print(f"held-out, not scored: {', '.join(excluded)} (--include-held-out to score)")
     print(format_report(evaluate(predicted, labels, args.tolerance)))
     return 0
 

@@ -62,6 +62,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/eval.py` - rally eval: `load_rallies` (labeler JSON), `match_rallies`
   (max one-to-one match, both boundaries within tolerance, default 1.5s), `score_video` -> `Scores`
   (tp/fp/fn, P/R/F1, mean signed/abs start+end offsets), `evaluate` (per video + micro overall); CLI
+  (skips held-out videos unless `--include-held-out`)
 - `pipeline/volley_pipeline/audio.py` - whistle detection: `load_wav` (mono float32),
   `whistle_activity` (chunked STFT: in-band 2-4 kHz peak-vs-median dB, band energy share),
   `detect_whistles` -> `Whistle(start_sec, end_sec, peak_hz, strength_db)`, `detect_whistles_in_file`

@@ -194,3 +194,45 @@ def test_cli_prints_per_video_and_overall(tmp_path, capsys):
     assert "vid1" in out and "overall" in out
     assert "0.667" in out  # recall 2/3, printed to 3 decimals
     assert "+0.50" in out  # mean start/end offset, signed, 2 decimals
+
+
+def _held_out_setup(tmp_path):
+    """vid1 (tune) predicted perfectly; vid2 (held-out) has no predictions."""
+    rallies = [{"start_sec": s, "end_sec": e} for s, e in LABELS]
+    for d in ("labels", "pred"):
+        (tmp_path / d).mkdir()
+    (tmp_path / "labels" / "vid1.json").write_text(json.dumps(rallies))
+    (tmp_path / "labels" / "vid2.json").write_text(json.dumps(rallies))
+    (tmp_path / "pred" / "vid1.json").write_text(json.dumps(rallies))
+    doc = tmp_path / "videos.md"
+    doc.write_text("| ID | Split |\n|---|---|\n| vid1 | tune |\n| vid2 | held-out |\n")
+    return ["--pred", str(tmp_path / "pred"), "--labels", str(tmp_path / "labels"),
+            "--videos-doc", str(doc)]  # fmt: skip
+
+
+def _overall_row(out):
+    return next(line for line in out.splitlines() if line.startswith("overall")).split()
+
+
+def test_cli_excludes_held_out_by_default(tmp_path, capsys):
+    code = rally_eval.main(_held_out_setup(tmp_path))
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "vid2" not in [line.split()[0] for line in captured.out.splitlines() if line]
+    assert "held-out, not scored: vid2" in captured.out
+    assert "no predictions for vid2" not in captured.err
+    assert _overall_row(captured.out)[1:4] == ["3", "0", "0"]  # tp fp fn
+
+
+def test_cli_include_held_out_scores_it(tmp_path, capsys):
+    code = rally_eval.main([*_held_out_setup(tmp_path), "--include-held-out"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert any(line.startswith("vid2") for line in out.splitlines())
+    assert _overall_row(out)[1:4] == ["3", "0", "3"]  # vid2's rallies count as missed
+
+
+def test_cli_missing_explicit_videos_doc_is_an_error(tmp_path):
+    args = _held_out_setup(tmp_path)
+    args[-1] = str(tmp_path / "nope.md")
+    assert rally_eval.main(args) == 1

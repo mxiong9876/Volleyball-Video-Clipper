@@ -41,7 +41,8 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
   --out ../data/predictions --run <run_name>` (skips Split=held-out in docs/videos.md;
   `--include-held-out` to run them)
 - Eval: `cd pipeline && uv run python -m volley_pipeline.eval --pred <dir> --labels ../data/labels`
-  (`--tolerance 1.5`; pred dir holds <youtube_id>.json in the labeler format)
+  (`--tolerance 1.5`; pred dir holds <youtube_id>.json in the labeler format; held-out
+  videos in docs/videos.md aren't scored unless `--include-held-out`, for the final check)
 - Labeler: `open -a "Google Chrome" tools/labeler/index.html` → pick data/ (see tools/labeler/README.md)
 - Single test: `cd api && uv run pytest tests/test_health.py::test_health_ok`
 - Env: copy `.env.example` → `.env` (api) and `web/.env.example` → `web/.env`
