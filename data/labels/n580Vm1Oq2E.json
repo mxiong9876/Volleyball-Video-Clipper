@@ -1,26 +1,26 @@
 [
   {
-    "start_sec": 2.47,
+    "start_sec": 3.31,
     "end_sec": 6.27
   },
   {
-    "start_sec": 42.36,
+    "start_sec": 43.27,
     "end_sec": 45.34
   },
   {
-    "start_sec": 60.54,
+    "start_sec": 61.23,
     "end_sec": 64.59
   },
   {
-    "start_sec": 76.44,
+    "start_sec": 77.25,
     "end_sec": 83.95
   },
   {
-    "start_sec": 99.46,
+    "start_sec": 100.22,
     "end_sec": 102.67
   },
   {
-    "start_sec": 114.18,
+    "start_sec": 115.23,
     "end_sec": 119.99
   },
   {
@@ -28,7 +28,7 @@
     "end_sec": 143.49
   },
   {
-    "start_sec": 160.74,
+    "start_sec": 161.18,
     "end_sec": 166.68
   },
   {
@@ -48,7 +48,7 @@
     "end_sec": 275.97
   },
   {
-    "start_sec": 295.71,
+    "start_sec": 295.99,
     "end_sec": 314.36
   },
   {
@@ -60,19 +60,19 @@
     "end_sec": 360.94
   },
   {
-    "start_sec": 373.2,
+    "start_sec": 373.52,
     "end_sec": 379.31
   },
   {
-    "start_sec": 393.59,
+    "start_sec": 393.92,
     "end_sec": 417.74
   },
   {
-    "start_sec": 433.73,
+    "start_sec": 434.06,
     "end_sec": 440.81
   },
   {
-    "start_sec": 452.47,
+    "start_sec": 452.63,
     "end_sec": 458.56
   },
   {
@@ -84,7 +84,7 @@
     "end_sec": 488.66
   },
   {
-    "start_sec": 513.27,
+    "start_sec": 513.54,
     "end_sec": 523.9
   },
   {
@@ -92,19 +92,19 @@
     "end_sec": 542.04
   },
   {
-    "start_sec": 559.65,
+    "start_sec": 559.81,
     "end_sec": 564.39
   },
   {
-    "start_sec": 578.48,
+    "start_sec": 578.66,
     "end_sec": 580.86
   },
   {
-    "start_sec": 594.39,
+    "start_sec": 594.43,
     "end_sec": 600.69
   },
   {
-    "start_sec": 612.65,
+    "start_sec": 612.72,
     "end_sec": 614.59
   },
   {
@@ -120,7 +120,7 @@
     "end_sec": 697.17
   },
   {
-    "start_sec": 710.23,
+    "start_sec": 710.28,
     "end_sec": 720.1
   },
   {
@@ -184,7 +184,7 @@
     "end_sec": 1088.35
   },
   {
-    "start_sec": 1105.17,
+    "start_sec": 1105.31,
     "end_sec": 1106.88
   },
   {
@@ -196,7 +196,7 @@
     "end_sec": 1152.38
   },
   {
-    "start_sec": 1167.3,
+    "start_sec": 1167.46,
     "end_sec": 1183.83
   }
 ]
