@@ -8,6 +8,8 @@ description: Compact map of the Volley Breakdown repo (what each file/folder doe
 ## Root
 - `CLAUDE.md` - project rules, stack, commands
 - `docs/BLUEPRINT.md` - full product spec and development phases
+- `docs/videos.md` - test video table (ID, angle, whistle, Split tune/held-out, label status)
+- `docs/labeling-rules.md` - rally start/end definitions used by the labels
 - `Makefile` - install/up/down/dev/test/lint
 - `docker-compose.yml` - Postgres 16 + Redis 7 with healthchecks
 - `pyproject.toml` - uv workspace root (virtual; members: api, pipeline)
@@ -51,7 +53,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   task status flow + stale-job recovery, RQ liveness (lookup/enqueue/RQ all faked)
 
 ## pipeline/ (pure-Python analysis, no web imports)
-- `pipeline/pyproject.toml` - hatchling package `volley_pipeline`
+- `pipeline/pyproject.toml` - hatchling package `volley_pipeline` (deps: yt-dlp, numpy, scipy)
 - `pipeline/volley_pipeline/__init__.py` - package root, `__version__`
 - `pipeline/volley_pipeline/ingest.py` - `parse_youtube_id` (no network), `fetch_metadata`,
   `check_duration` (3h cap), `download_video` (-> video.mp4, cleans partials),
@@ -59,8 +61,11 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/eval.py` - rally eval: `load_rallies` (labeler JSON), `match_rallies`
   (max one-to-one match, both boundaries within tolerance, default 1.5s), `score_video` -> `Scores`
   (tp/fp/fn, P/R/F1, mean signed/abs start+end offsets), `evaluate` (per video + micro overall); CLI
+- `pipeline/volley_pipeline/videos.py` - `held_out_ids` (parses the Split column of
+  docs/videos.md), `default_videos_doc` (data/<x> -> docs/videos.md)
 - `pipeline/tests/test_smoke.py` - import smoke test
 - `pipeline/tests/test_eval.py` - eval tests on hand-made rally lists (tolerance edges, offsets, CLI)
+- `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 
 ## web/ (React + Vite + TS + Tailwind + TanStack Query)

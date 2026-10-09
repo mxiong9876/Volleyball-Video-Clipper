@@ -8,12 +8,13 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 ## Structure
 - web/      React + Vite + TypeScript + Tailwind, TanStack Query, Recharts
 - api/      FastAPI (Python 3.11), SQLAlchemy, Postgres, Redis + RQ worker
-- pipeline/ Pure-Python analysis (yt-dlp, ffmpeg, PySceneDetect, librosa,
+- pipeline/ Pure-Python analysis (yt-dlp, ffmpeg, PySceneDetect, numpy, scipy,
             OpenCV, PaddleOCR). No web imports. Every stage runnable from CLI.
 
 ## Stack (approved tooling, in addition to the above)
 - uv workspace: root pyproject.toml lists api/ + pipeline/; one uv.lock and .venv at
   the root. api depends on volley-pipeline (workspace source). Python 3.11
+- pipeline runtime: numpy, scipy (signal processing; used instead of librosa)
 - api runtime: uvicorn, psycopg[binary] (Postgres driver), redis, alembic, rq
 - Python dev group (`[dependency-groups] dev`): pytest, ruff, httpx2 (api only;
   Starlette's TestClient deprecated plain httpx)
