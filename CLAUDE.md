@@ -37,6 +37,9 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - `make lint` - ruff check + format check (Python), oxlint + tsc (web)
 - Ingest CLI: `cd pipeline && uv run python -m volley_pipeline.ingest <url> --out ../data/raw`
   (writes data/raw/<youtube_id>/video.mp4 + audio.wav)
+- Detect (whistle baseline): `cd pipeline && uv run python -m volley_pipeline.segment --raw ../data/raw
+  --out ../data/predictions --run <run_name>` (skips Split=held-out in docs/videos.md;
+  `--include-held-out` to run them)
 - Eval: `cd pipeline && uv run python -m volley_pipeline.eval --pred <dir> --labels ../data/labels`
   (`--tolerance 1.5`; pred dir holds <youtube_id>.json in the labeler format)
 - Labeler: `open -a "Google Chrome" tools/labeler/index.html` → pick data/ (see tools/labeler/README.md)

@@ -15,7 +15,8 @@ description: Compact map of the Volley Breakdown repo (what each file/folder doe
 - `pyproject.toml` - uv workspace root (virtual; members: api, pipeline)
 - `uv.lock` - single lockfile for the whole Python workspace
 - `.env.example` - DATABASE_URL, REDIS_URL for the api (copy to `.env`)
-- `data/labels/` - committed rally labels for eval; `data/raw/` holds local test media (gitignored)
+- `data/labels/` - committed rally labels for eval; `data/raw/` holds local test media and
+  `data/predictions/<run>/` detector output (both gitignored)
 - `tools/labeler/index.html` - standalone Chrome page (File System Access API) for hand-labeling
   rallies (S/E/Z keys); reads data/raw/<id>/video.mp4, autosaves data/labels/<id>.json
   (`[{start_sec, end_sec}]`). Usage in `tools/labeler/README.md`
@@ -64,11 +65,15 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/audio.py` - whistle detection: `load_wav` (mono float32),
   `whistle_activity` (chunked STFT: in-band 2-4 kHz peak-vs-median dB, band energy share),
   `detect_whistles` -> `Whistle(start_sec, end_sec, peak_hz, strength_db)`, `detect_whistles_in_file`
+- `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
+  consecutive whistles); CLI runs every non-held-out data/raw/<id>/audio.wav and writes
+  data/predictions/<run>/<id>.json (labels format), <id>.whistles.json, _run.json
 - `pipeline/volley_pipeline/videos.py` - `held_out_ids` (parses the Split column of
-  docs/videos.md), `default_videos_doc` (data/<x> -> docs/videos.md)
+  docs/videos.md), `default_videos_doc` (data/<x> -> docs/videos.md), `load_held_out` (CLI helper)
 - `pipeline/tests/test_smoke.py` - import smoke test
 - `pipeline/tests/test_eval.py` - eval tests on hand-made rally lists (tolerance edges, offsets, CLI)
 - `pipeline/tests/test_audio.py` - whistle detection on synthetic tones/trills/noise (no real media)
+- `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs (held-out skip)
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 
@@ -85,7 +90,9 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 Built (Phase 1): POST /videos → api validates + looks up metadata → inserts videos +
 analysis_jobs row → enqueues on Redis (RQ) → worker runs volley_pipeline.ingest (download
 → data/raw/<youtube_id>/video.mp4, audio.wav) and updates status/progress → GET /jobs/{id}.
-Planned: rally segmentation, OCR, results in Postgres → web momentum chart + playback.
+Phase 2 (in progress): audio.wav → audio.detect_whistles → segment.whistles_to_rallies →
+data/predictions/<run>/ → eval / diagnose against data/labels.
+Planned: OCR, results in Postgres → web momentum chart + playback.
 
 ## Commands
 - `make install` - `uv sync --all-packages` + `npm install` in web/

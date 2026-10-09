@@ -5,6 +5,7 @@ docs/videos.md is a markdown table with an `ID` column and a `Split` column (`tu
 unless explicitly included.
 """
 
+import sys
 from pathlib import Path
 
 _HELD_OUT = {"held-out", "held out", "heldout"}
@@ -46,3 +47,22 @@ def held_out_ids(path: str | Path) -> set[str]:
     if header is None:
         raise ValueError(f"{path}: no table with ID and Split columns")
     return held_out
+
+
+def load_held_out(
+    videos_doc: str | Path | None, data_subdir: str | Path, include: bool
+) -> set[str]:
+    """Held-out ids for a CLI to skip.
+
+    `include` disables skipping. An explicit `videos_doc` must exist; the default one
+    (docs/videos.md next to `data_subdir`'s data dir) may be missing, meaning none held out.
+    """
+    if include:
+        return set()
+    if videos_doc is not None:
+        return held_out_ids(videos_doc)
+    default = default_videos_doc(data_subdir)
+    if not default.exists():
+        print(f"note: {default} not found; not skipping held-out videos", file=sys.stderr)
+        return set()
+    return held_out_ids(default)
