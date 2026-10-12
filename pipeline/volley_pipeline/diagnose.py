@@ -15,10 +15,18 @@ start (the server has seconds after the whistle to serve); an end whistle is one
 Unmatched predictions are dead_time (overlap no label) or overlap (cover a label, wrong
 boundaries). `chance` is the share of random windows of the serve window's length that hold
 a whistle (Poisson, from the whistle rate): serve-window hit rates near it mean the "hits"
-are coincidence, i.e. no real referee whistle. Reads a segment run dir:
+are coincidence, i.e. no real referee whistle.
+
+A detector-agnostic boundary table works for any run (whistle files not needed). Each
+unmatched label is missed (no prediction overlaps it), split (2+ predictions overlap it),
+merged (its one overlapping prediction also overlaps another label) or boundary (one
+prediction, one label, start or end off by more than the tolerance). Start/end offsets are
+prediction − label over one-to-one overlaps (matched or boundary). When the run has
+<id>.cuts.json, unmatched predictions containing a camera cut are counted. Reads a segment
+run dir (whistle tables use its <id>.whistles.json, or another run's via --whistles):
 
     uv run python -m volley_pipeline.diagnose --pred ../data/predictions/<run> \
-        --labels ../data/labels
+        --labels ../data/labels [--whistles ../data/predictions/whistle_v0]
 """
 
 import argparse
@@ -40,6 +48,7 @@ SERVE_WINDOW = (-10.0, 1.0)  # whistle onset - label start
 END_WINDOW = (-1.0, 4.0)  # whistle onset - label end
 LABEL_BUCKETS = ("matched", "offset_only", "mispaired", "serve_missed", "end_missed", "no_whistle")
 PRED_BUCKETS = ("dead_time", "overlap")
+BOUNDARY_BUCKETS = ("matched", "boundary", "merged", "split", "missed")
 
 
 @dataclass
@@ -119,6 +128,93 @@ def diagnose_video(
     return d
 
 
+@dataclass
+class BoundaryDiagnosis:
+    labels: Counter = field(default_factory=Counter)
+    n_labels: int = 0
+    n_preds: int = 0
+    unmatched_preds: int = 0
+    unmatched_with_cut: int = 0
+    start_offsets: list[float] = field(default_factory=list)  # pred − label, one-to-one
+    end_offsets: list[float] = field(default_factory=list)
+
+
+def boundary_diagnosis(
+    labels: Sequence[Rally],
+    predicted: Sequence[Rally],
+    cuts: Sequence[float] = (),
+    *,
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> BoundaryDiagnosis:
+    """Bucket labels by how predictions overlap them; works for any detector."""
+    pairs = match_rallies(predicted, labels, tolerance)
+    matched_labels = {j for _, j in pairs}
+    matched_preds = {i for i, _ in pairs}
+    overlaps = [[i for i, p in enumerate(predicted) if _overlaps(p, lab)] for lab in labels]
+    labels_per_pred = Counter(i for over in overlaps for i in over)
+
+    d = BoundaryDiagnosis(n_labels=len(labels), n_preds=len(predicted))
+    for j, ((start, end), over) in enumerate(zip(labels, overlaps, strict=True)):
+        if len(over) == 1 and labels_per_pred[over[0]] == 1:  # one-to-one overlap
+            ps, pe = predicted[over[0]]
+            d.start_offsets.append(ps - start)
+            d.end_offsets.append(pe - end)
+        if j in matched_labels:
+            bucket = "matched"
+        elif not over:
+            bucket = "missed"
+        elif len(over) > 1:
+            bucket = "split"
+        elif labels_per_pred[over[0]] > 1:
+            bucket = "merged"
+        else:
+            bucket = "boundary"
+        d.labels[bucket] += 1
+
+    for i, (ps, pe) in enumerate(predicted):
+        if i not in matched_preds:
+            d.unmatched_preds += 1
+            d.unmatched_with_cut += any(ps <= t <= pe for t in cuts)
+    return d
+
+
+def _merge_boundary(ds: Sequence[BoundaryDiagnosis]) -> BoundaryDiagnosis:
+    total = BoundaryDiagnosis()
+    for d in ds:
+        total.labels += d.labels
+        total.n_labels += d.n_labels
+        total.n_preds += d.n_preds
+        total.unmatched_preds += d.unmatched_preds
+        total.unmatched_with_cut += d.unmatched_with_cut
+        total.start_offsets += d.start_offsets
+        total.end_offsets += d.end_offsets
+    return total
+
+
+def format_boundary(per_video: dict[str, BoundaryDiagnosis]) -> str:
+    cols = [("labels", 7), *((b, len(b) + 2) for b in BOUNDARY_BUCKETS)]
+    cols += [("preds", 7), ("unmatched", 11), ("w/ cut", 8)]
+    header = (
+        f"{'video':<14}"
+        + "".join(f"{name:>{w}}" for name, w in cols)
+        + f"{'pred − label start':>24}{'pred − label end':>24}"
+    )
+    lines = ["boundaries: labels by overlap bucket | predictions (offsets: median [IQR], s)"]
+    lines += [header, "-" * len(header)]
+    rows = [*per_video.items(), ("overall", _merge_boundary(list(per_video.values())))]
+    for name, d in rows:
+        if name == "overall":
+            lines.append("-" * len(header))
+        vals = [d.n_labels, *(d.labels[b] for b in BOUNDARY_BUCKETS)]
+        vals += [d.n_preds, d.unmatched_preds, d.unmatched_with_cut]
+        lines.append(
+            f"{name:<14}"
+            + "".join(f"{v:>{w}}" for v, (_, w) in zip(vals, cols, strict=True))
+            + f"{_dist(d.start_offsets):>24}{_dist(d.end_offsets):>24}"
+        )
+    return "\n".join(lines)
+
+
 def _merge(ds: Sequence[Diagnosis]) -> Diagnosis:
     total = Diagnosis()
     for d in ds:
@@ -189,7 +285,10 @@ def _wav_duration(path: Path) -> float | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Bucket a run's misses by nearby whistles.")
-    parser.add_argument("--pred", required=True, help="segment run dir (<id>.json + whistles)")
+    parser.add_argument("--pred", required=True, help="segment run dir (<id>.json [+ whistles])")
+    parser.add_argument(
+        "--whistles", help="run dir to take <id>.whistles.json from (default: --pred)"
+    )
     parser.add_argument("--labels", default="data/labels", help="dir of labeled <youtube_id>.json")
     parser.add_argument("--raw", help="data/raw, for video durations (default: next to labels)")
     parser.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE, help="seconds")
@@ -198,22 +297,36 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     pred_dir, label_dir = Path(args.pred), Path(args.labels)
+    whistle_dir = Path(args.whistles) if args.whistles else pred_dir
     raw_dir = Path(args.raw) if args.raw else label_dir.parent / "raw"
     per_video: dict[str, Diagnosis] = {}
+    boundary: dict[str, BoundaryDiagnosis] = {}
     try:
         held_out = videos.load_held_out(args.videos_doc, label_dir, args.include_held_out)
         for label_path in sorted(label_dir.glob("*.json")):
             vid = label_path.stem
             if vid in held_out:
                 continue
-            pred_path, whistle_path = pred_dir / f"{vid}.json", pred_dir / f"{vid}.whistles.json"
-            if not pred_path.exists() or not whistle_path.exists():
-                print(f"warning: no predictions/whistles for {vid}; skipped", file=sys.stderr)
+            pred_path = pred_dir / f"{vid}.json"
+            if not pred_path.exists():
+                print(f"warning: no predictions for {vid}; skipped", file=sys.stderr)
+                continue
+            labels, preds = load_rallies(label_path), load_rallies(pred_path)
+            cuts_path = pred_dir / f"{vid}.cuts.json"
+            cuts = (
+                [float(c["t_sec"]) for c in json.loads(cuts_path.read_text())]
+                if cuts_path.exists()
+                else []
+            )
+            boundary[vid] = boundary_diagnosis(labels, preds, cuts, tolerance=args.tolerance)
+            whistle_path = whistle_dir / f"{vid}.whistles.json"
+            if not whistle_path.exists():
+                print(f"warning: no whistles for {vid}; whistle tables skip it", file=sys.stderr)
                 continue
             whistles = [float(w["start_sec"]) for w in json.loads(whistle_path.read_text())]
             per_video[vid] = diagnose_video(
-                load_rallies(label_path),
-                load_rallies(pred_path),
+                labels,
+                preds,
                 whistles,
                 duration_sec=_wav_duration(raw_dir / vid / "audio.wav"),
                 tolerance=args.tolerance,
@@ -221,11 +334,14 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    if not per_video:
+    if not boundary:
         print(f"error: nothing to diagnose in {pred_dir}", file=sys.stderr)
         return 1
     print(f"tolerance ±{args.tolerance:g}s; serve window {SERVE_WINDOW}, end window {END_WINDOW}")
-    print(format_diagnosis(per_video))
+    if per_video:
+        print(format_diagnosis(per_video))
+        print()
+    print(format_boundary(boundary))
     return 0
 
 

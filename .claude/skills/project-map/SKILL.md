@@ -69,7 +69,9 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   `detect_whistles` -> `Whistle(start_sec, end_sec, peak_hz, strength_db)`, `detect_whistles_in_file`
 - `pipeline/volley_pipeline/diagnose.py` - `diagnose_video`: buckets unmatched labels by nearby
   detected whistles (no_whistle/serve_missed/end_missed/mispaired/offset_only) and unmatched preds
-  (dead_time/overlap), whistle rate vs chance, serve/end whistle offsets; CLI over a run dir
+  (dead_time/overlap), whistle rate vs chance, serve/end whistle offsets; `boundary_diagnosis`
+  (any detector: matched/boundary/merged/split/missed, start/end offsets, unmatched preds with a
+  cut); CLI over a run dir (whistle tables optional; `--whistles <run>` borrows another run's)
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
   consecutive whistles), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
   runs every non-held-out data/raw/<id>/audio.wav (or video.mp4) and writes
@@ -87,7 +89,8 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/tests/test_audio.py` - whistle detection on synthetic tones/trills/noise (no real media)
 - `pipeline/tests/test_motion.py` - motion on synthetic frames/energy arrays; reader + cache on a
   generated ffmpeg clip
-- `pipeline/tests/test_diagnose.py` - diagnose smoke test (CLI + buckets on a tiny hand-made run)
+- `pipeline/tests/test_diagnose.py` - diagnose smoke test (CLI + whistle and boundary buckets on
+  tiny hand-made runs)
 - `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs / ffmpeg clips
   (both detectors, held-out skip)
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
@@ -106,8 +109,9 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 Built (Phase 1): POST /videos → api validates + looks up metadata → inserts videos +
 analysis_jobs row → enqueues on Redis (RQ) → worker runs volley_pipeline.ingest (download
 → data/raw/<youtube_id>/video.mp4, audio.wav) and updates status/progress → GET /jobs/{id}.
-Phase 2 (in progress): audio.wav → audio.detect_whistles → segment.whistles_to_rallies →
-data/predictions/<run>/ → eval / diagnose against data/labels.
+Phase 2 (in progress): audio.wav → audio.detect_whistles → segment.whistles_to_rallies, or
+video.mp4 → motion (energy, cuts; cached .npz) → motion_to_rallies → data/predictions/<run>/ →
+eval / diagnose against data/labels.
 Planned: OCR, results in Postgres → web momentum chart + playback.
 
 ## Commands

@@ -37,14 +37,17 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - `make lint` - ruff check + format check (Python), oxlint + tsc (web)
 - Ingest CLI: `cd pipeline && uv run python -m volley_pipeline.ingest <url> --out ../data/raw`
   (writes data/raw/<youtube_id>/video.mp4 + audio.wav)
-- Detect (whistle baseline): `cd pipeline && uv run python -m volley_pipeline.segment --raw ../data/raw
-  --out ../data/predictions --run <run_name>` (skips Split=held-out in docs/videos.md;
-  `--include-held-out` to run them)
+- Detect: `cd pipeline && uv run python -m volley_pipeline.segment --raw ../data/raw
+  --out ../data/predictions --run <run_name> [--detector whistle|motion]` (default whistle; skips
+  Split=held-out in docs/videos.md, `--include-held-out` to run them; motion caches its signal in
+  data/raw/<id>/motion_5fps_160x90.npz, `--no-cache` to recompute)
+- Motion for one video: `cd pipeline && uv run python -m volley_pipeline.motion ../data/raw/<id>/video.mp4`
 - Eval: `cd pipeline && uv run python -m volley_pipeline.eval --pred <dir> --labels ../data/labels`
   (`--tolerance 1.5`; pred dir holds <youtube_id>.json in the labeler format; held-out
   videos in docs/videos.md aren't scored unless `--include-held-out`, for the final check)
 - Diagnose: `cd pipeline && uv run python -m volley_pipeline.diagnose --pred ../data/predictions/<run>
-  --labels ../data/labels` (miss buckets per video; run after every detector change)
+  --labels ../data/labels [--whistles ../data/predictions/whistle_v0]` (miss buckets per video;
+  run after every detector change; whistle tables need <id>.whistles.json in --pred or --whistles)
 - Eval log: append one line to docs/eval-log.md after every detector run (date, run, change, P/R/F1)
 - Labeler: `open -a "Google Chrome" tools/labeler/index.html` → pick data/ (see tools/labeler/README.md)
 - Single test: `cd api && uv run pytest tests/test_health.py::test_health_ok`
