@@ -71,8 +71,10 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   detected whistles (no_whistle/serve_missed/end_missed/mispaired/offset_only) and unmatched preds
   (dead_time/overlap), whistle rate vs chance, serve/end whistle offsets; CLI over a run dir
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
-  consecutive whistles); CLI runs every non-held-out data/raw/<id>/audio.wav and writes
-  data/predictions/<run>/<id>.json (labels format), <id>.whistles.json, _run.json
+  consecutive whistles), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
+  runs every non-held-out data/raw/<id>/audio.wav (or video.mp4) and writes
+  data/predictions/<run>/<id>.json (labels format), _run.json, plus <id>.whistles.json (whistle)
+  or <id>.cuts.json + <id>.motion.json (motion)
 - `pipeline/volley_pipeline/motion.py` - motion energy: `iter_gray_frames` (ffmpeg pipe, 5 fps,
   160x90 gray), `frame_signals` (per-pair energy + histogram distance), `detect_cuts` (hist change +
   lone energy spike), `mask_cuts`, `active_runs`/`motion_to_rallies` (smoothed, scaled to video's
@@ -86,7 +88,8 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/tests/test_motion.py` - motion on synthetic frames/energy arrays; reader + cache on a
   generated ffmpeg clip
 - `pipeline/tests/test_diagnose.py` - diagnose smoke test (CLI + buckets on a tiny hand-made run)
-- `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs (held-out skip)
+- `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs / ffmpeg clips
+  (both detectors, held-out skip)
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 

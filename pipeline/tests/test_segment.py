@@ -1,6 +1,9 @@
 import json
+import shutil
+import subprocess
 
 import numpy as np
+import pytest
 from scipy.io import wavfile
 
 from volley_pipeline import segment
@@ -85,4 +88,55 @@ def test_cli_writes_label_format_and_skips_held_out(tmp_path, capsys):
 def test_cli_errors_without_audio(tmp_path):
     (tmp_path / "raw").mkdir()
     code = segment.main(["--raw", str(tmp_path / "raw"), "--out", str(tmp_path), "--run", "x"])
+    assert code == 1
+
+
+def _motion_clip(path):
+    """4 s black, 3 s moving test pattern, 4 s black (30 fps), generated with ffmpeg."""
+    path.parent.mkdir(parents=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", "color=c=black:size=320x180:rate=30:duration=4",
+         "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=3",
+         "-f", "lavfi", "-i", "color=c=black:size=320x180:rate=30:duration=4",
+         "-filter_complex", "[0][1][2]concat=n=3:v=1:a=0",
+         "-pix_fmt", "yuv420p", str(path)],
+        check=True,
+    )  # fmt: skip
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH")
+def test_cli_motion_detector_writes_rallies_cuts_and_skips_held_out(tmp_path, capsys):
+    raw = tmp_path / "raw"
+    _motion_clip(raw / "aaaaaaaaaaa" / "video.mp4")
+    _motion_clip(raw / "bbbbbbbbbbb" / "video.mp4")
+    doc = tmp_path / "videos.md"
+    doc.write_text(
+        "| ID | Split |\n|---|---|\n| aaaaaaaaaaa | tune |\n| bbbbbbbbbbb | held-out |\n"
+    )
+    out = tmp_path / "pred"
+
+    code = segment.main(
+        ["--raw", str(raw), "--out", str(out), "--run", "m1", "--videos-doc", str(doc),
+         "--detector", "motion"]
+    )  # fmt: skip
+    assert code == 0
+    run_dir = out / "m1"
+    assert not (run_dir / "bbbbbbbbbbb.json").exists()
+    [(s, e)] = load_rallies(run_dir / "aaaaaaaaaaa.json")
+    assert abs(s - 4.0) <= 1.0 and abs(e - 7.0) <= 1.0
+    cuts = [c["t_sec"] for c in json.loads((run_dir / "aaaaaaaaaaa.cuts.json").read_text())]
+    assert any(abs(t - 4.0) <= 0.4 for t in cuts)
+    assert json.loads((run_dir / "_run.json").read_text())["detector"] == "motion"
+    assert json.loads((run_dir / "aaaaaaaaaaa.motion.json").read_text())["rallies"] == 1
+    assert (raw / "aaaaaaaaaaa" / "motion_5fps_160x90.npz").is_file()
+    assert "held out" in capsys.readouterr().out
+
+
+def test_cli_motion_errors_without_video(tmp_path):
+    (tmp_path / "raw").mkdir()
+    code = segment.main(
+        ["--raw", str(tmp_path / "raw"), "--out", str(tmp_path), "--run", "x",
+         "--detector", "motion"]
+    )  # fmt: skip
     assert code == 1
