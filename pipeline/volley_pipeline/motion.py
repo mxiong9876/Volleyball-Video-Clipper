@@ -163,6 +163,25 @@ def mask_cuts(
     return out
 
 
+def normalized_energy(
+    energy: np.ndarray,
+    fps: float = FPS,
+    *,
+    smooth_sec: float = SMOOTH_SEC,
+    floor_q: float = FLOOR_Q,
+    peak_q: float = PEAK_Q,
+) -> np.ndarray | None:
+    """Smoothed energy scaled so the video's floor_q -> 0 and peak_q -> 1; None if flat/empty."""
+    x = np.asarray(energy, dtype=np.float64)
+    if len(x) == 0:
+        return None
+    s = uniform_filter1d(x, size=max(1, round(smooth_sec * fps)), mode="nearest")
+    floor, peak = np.percentile(s, [floor_q, peak_q])
+    if peak - floor <= 1e-12:
+        return None
+    return (s - floor) / (peak - floor)
+
+
 def active_runs(
     energy: np.ndarray,
     fps: float = FPS,
@@ -175,14 +194,9 @@ def active_runs(
     bridge_sec: float = BRIDGE_SEC,
 ) -> list[Rally]:
     """Active stretches (start_sec, end_sec) of the smoothed signal, before duration limits."""
-    x = np.asarray(energy, dtype=np.float64)
-    if len(x) == 0:
+    norm = normalized_energy(energy, fps, smooth_sec=smooth_sec, floor_q=floor_q, peak_q=peak_q)
+    if norm is None:
         return []
-    s = uniform_filter1d(x, size=max(1, round(smooth_sec * fps)), mode="nearest")
-    floor, peak = np.percentile(s, [floor_q, peak_q])
-    if peak - floor <= 1e-12:
-        return []
-    norm = (s - floor) / (peak - floor)
 
     runs: list[tuple[int, int]] = []  # inclusive pair indices
     i, n = 0, len(norm)

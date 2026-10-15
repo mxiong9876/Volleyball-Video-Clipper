@@ -55,7 +55,8 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   task status flow + stale-job recovery, RQ liveness (lookup/enqueue/RQ all faked)
 
 ## pipeline/ (pure-Python analysis, no web imports)
-- `pipeline/pyproject.toml` - hatchling package `volley_pipeline` (deps: yt-dlp, numpy, scipy)
+- `pipeline/pyproject.toml` - hatchling package `volley_pipeline` (deps: yt-dlp, numpy, scipy;
+  dev: pytest, ruff, matplotlib)
 - `pipeline/volley_pipeline/__init__.py` - package root, `__version__`
 - `pipeline/volley_pipeline/ingest.py` - `parse_youtube_id` (no network), `fetch_metadata`,
   `check_duration` (3h cap), `download_video` (-> video.mp4, cleans partials),
@@ -71,7 +72,12 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   detected whistles (no_whistle/serve_missed/end_missed/mispaired/offset_only) and unmatched preds
   (dead_time/overlap), whistle rate vs chance, serve/end whistle offsets; `boundary_diagnosis`
   (any detector: matched/boundary/merged/split/missed, start/end offsets, unmatched preds with a
-  cut); CLI over a run dir (whistle tables optional; `--whistles <run>` borrows another run's)
+  cut, `missed` labels); CLI over a run dir (whistle tables optional; `--whistles <run>` borrows
+  another run's)
+- `pipeline/volley_pipeline/plots.py` - motion run diagnostic PNGs (matplotlib, dev-only, imported
+  lazily): `<id>_timeline.png` (energy strips, labels colored matched/wrong boundary/no overlap,
+  short labels hatched, predictions, cuts), `<id>_aligned.png` (`aligned_profiles` at label
+  start/end); prints short-vs-missed counts; CLI writes <run>/plots/
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
   consecutive whistles), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
   runs every non-held-out data/raw/<id>/audio.wav (or video.mp4) and writes
@@ -80,7 +86,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/volley_pipeline/motion.py` - motion energy: `iter_gray_frames` (ffmpeg pipe, 5 fps,
   160x90 gray), `frame_signals` (per-pair energy + histogram distance), `detect_cuts` (hist change +
   lone energy spike), `mask_cuts`, `active_runs`/`motion_to_rallies` (smoothed, scaled to video's
-  p20..p95, hysteresis hi/lo, bridge, min/max), `compute_motion` (cache
+  p20..p95 via `normalized_energy`, hysteresis hi/lo, bridge, min/max), `compute_motion` (cache
   data/raw/<id>/motion_<fps>fps_<w>x<h>.npz); CLI prints one video's summary + cuts
 - `pipeline/volley_pipeline/videos.py` - `held_out_ids` (parses the Split column of
   docs/videos.md), `default_videos_doc` (data/<x> -> docs/videos.md), `load_held_out` (CLI helper)
@@ -89,6 +95,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `pipeline/tests/test_audio.py` - whistle detection on synthetic tones/trills/noise (no real media)
 - `pipeline/tests/test_motion.py` - motion on synthetic frames/energy arrays; reader + cache on a
   generated ffmpeg clip
+- `pipeline/tests/test_plots.py` - aligned profiles, short-miss counts, CLI smoke (fake cache)
 - `pipeline/tests/test_diagnose.py` - diagnose smoke test (CLI + whistle and boundary buckets on
   tiny hand-made runs)
 - `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs / ffmpeg clips

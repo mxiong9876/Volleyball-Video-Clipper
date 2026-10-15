@@ -56,3 +56,10 @@ def test_cli_without_whistles_prints_boundary_table(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "boundaries" in out and "whistles near labels" not in out
+
+
+def test_boundary_missed_lists_labels_without_any_overlap():
+    labels = [(10.0, 20.0), (30.0, 32.0), (50.0, 55.0)]
+    preds = [(9.0, 21.0), (53.0, 60.0)]
+    d = diagnose.boundary_diagnosis(labels, preds)
+    assert d.missed == [(30.0, 32.0)]

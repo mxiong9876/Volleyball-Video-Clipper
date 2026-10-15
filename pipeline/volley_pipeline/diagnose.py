@@ -137,6 +137,7 @@ class BoundaryDiagnosis:
     unmatched_with_cut: int = 0
     start_offsets: list[float] = field(default_factory=list)  # pred − label, one-to-one
     end_offsets: list[float] = field(default_factory=list)
+    missed: list[Rally] = field(default_factory=list)  # labels no prediction overlaps
 
 
 def boundary_diagnosis(
@@ -163,6 +164,7 @@ def boundary_diagnosis(
             bucket = "matched"
         elif not over:
             bucket = "missed"
+            d.missed.append((start, end))
         elif len(over) > 1:
             bucket = "split"
         elif labels_per_pred[over[0]] > 1:
@@ -188,6 +190,7 @@ def _merge_boundary(ds: Sequence[BoundaryDiagnosis]) -> BoundaryDiagnosis:
         total.unmatched_with_cut += d.unmatched_with_cut
         total.start_offsets += d.start_offsets
         total.end_offsets += d.end_offsets
+        total.missed += d.missed
     return total
 
 

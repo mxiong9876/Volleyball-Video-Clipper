@@ -187,3 +187,16 @@ def test_compute_motion_finds_cut_and_caches(tmp_path):
 def test_missing_video_raises(tmp_path):
     with pytest.raises(motion.MotionError):
         list(motion.iter_gray_frames(tmp_path / "nope.mp4"))
+
+
+def test_normalized_energy_scales_to_floor_and_peak():
+    x = plateaus(120, [(10.0, 18.0), (40.0, 52.0)])
+    norm = motion.normalized_energy(x, FPS)
+    assert np.percentile(norm, motion.FLOOR_Q) == pytest.approx(0, abs=1e-9)
+    assert np.percentile(norm, motion.PEAK_Q) == pytest.approx(1, abs=1e-9)
+    assert np.allclose(motion.normalized_energy(x * 10, FPS), norm)
+
+
+def test_normalized_energy_none_when_flat_or_empty():
+    assert motion.normalized_energy(np.zeros(50, dtype=np.float32), FPS) is None
+    assert motion.normalized_energy(np.zeros(0, dtype=np.float32), FPS) is None

@@ -17,7 +17,7 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - pipeline runtime: numpy, scipy (signal processing; used instead of librosa)
 - api runtime: uvicorn, psycopg[binary] (Postgres driver), redis, alembic, rq
 - Python dev group (`[dependency-groups] dev`): pytest, ruff, httpx2 (api only;
-  Starlette's TestClient deprecated plain httpx)
+  Starlette's TestClient deprecated plain httpx), matplotlib (pipeline only; diagnostic plots)
 - web lint: oxlint (Vite template default)
 
 ## Commands
@@ -48,6 +48,8 @@ Full spec: docs/BLUEPRINT.md. We build one phase at a time.
 - Diagnose: `cd pipeline && uv run python -m volley_pipeline.diagnose --pred ../data/predictions/<run>
   --labels ../data/labels [--whistles ../data/predictions/whistle_v0]` (miss buckets per video;
   run after every detector change; whistle tables need <id>.whistles.json in --pred or --whistles)
+- Plots: `cd pipeline && uv run python -m volley_pipeline.plots --pred ../data/predictions/<motion run>
+  --labels ../data/labels` (PNGs in <run>/plots/: per-video timeline + label-aligned energy)
 - Eval log: append one line to docs/eval-log.md after every detector run (date, run, change, P/R/F1)
 - Labeler: `open -a "Google Chrome" tools/labeler/index.html` → pick data/ (see tools/labeler/README.md)
 - Single test: `cd api && uv run pytest tests/test_health.py::test_health_ok`
