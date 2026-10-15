@@ -4,6 +4,8 @@
 Web app: paste a YouTube volleyball match URL → detect rallies, OCR the
 scoreboard, show a momentum chart, play rallies via the YouTube embed.
 Full spec: docs/BLUEPRINT.md. We build one phase at a time.
+Primary footage: back-of-court rec games (no whistle or scoreboard); broadcast is secondary,
+and scoreboard OCR is a broadcast-only extra (rec-game momentum comes from a manual winner tap).
 
 ## Structure
 - web/      React + Vite + TypeScript + Tailwind, TanStack Query, Recharts

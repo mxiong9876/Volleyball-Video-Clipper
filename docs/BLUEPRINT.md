@@ -16,6 +16,10 @@ Club and high school coaches who review film but can't afford Hudl-tier tools or
 Fans and content creators who want quick highlight cuts from long broadcasts.
 Scouts and recruits: club players build recruiting reels from full-match uploads.
 
+Primary footage
+
+Back-of-court rec games are the primary footage: a fixed camera behind the baseline, at eye level or raised, usually with no referee whistle and no scoreboard. Rally detection is designed, tuned, and judged on this footage first. Broadcast matches (moving cameras, cuts, replays, a scoreboard graphic) are secondary: supported and reported, but not what the defaults are tuned for.
+
 Differentiator
 
 Tools like Hudl and Balltime depend on uploads from their own ecosystem, often with manual tagging. This app works from any public link, with no tagging needed.
@@ -26,8 +30,8 @@ MVP (v1)
 Link ingestion: paste a YouTube URL; the backend downloads the video, extracts audio, and queues analysis.
 Rally segmentation: detect rally start and end times using whistle detection, motion energy, and scene-cut filtering, which removes replays and crowd shots.
 Rally timeline viewer: a list or timeline of rallies. Clicking one plays that exact segment, and there's a "skip to next rally" mode.
-Scoreboard OCR: the user drags a box around the score graphic once. The app then reads the score every few seconds and attaches it to each rally.
-Momentum graph: point differential over time for each set, with runs highlighted. Clicking any point jumps to its clip.
+Scoreboard OCR (broadcast-only extra): the user drags a box around the score graphic once. The app then reads the score every few seconds and attaches it to each rally. Rec games have no scoreboard, so this only applies to broadcast footage.
+Momentum graph: point differential over time for each set, with runs highlighted. Clicking any point jumps to its clip. For rec games, the score comes from a manual "who won this rally" tap in the viewer; for broadcast, it can come from scoreboard OCR.
 Basic filters: by set, rally length, and score situation (e.g., "within 2 points").
 Manual correction: users can nudge rally boundaries or fix a misread score. These corrections also become training labels later.
 
@@ -38,6 +42,7 @@ Learned rally detector: replace the heuristics with a classifier trained on user
 Auto-detect the scoreboard region instead of asking the user to draw the box.
 Bookmarks, tags, and notes on rallies, plus shareable links to a specific rally.
 Team accounts so a coach can share a film library with players.
+In-app recording tips: show users how to film for the best results (camera behind the end line, raised above head height).
 Phone-footage support: handle upload files with no scoreboard by inferring points from rally endings.
 Bridge to the CV track: court homography, ball tracking, and a stat sheet built on the rally segments.
 3. User Flow / Journey
@@ -122,10 +127,12 @@ Phase 2: Rally segmentation (≈ 2 weeks — the core of the product)
 
 Start with an audio-only whistle detector and measure it against your labels.
 Add motion energy from frame differencing, then scene-cut detection to drop replays.
-Combine the signals with simple rules: a rally starts at a serve whistle and ends when motion drops or the next whistle sounds.
+Combine the signals with simple rules: a rally starts at a serve whistle and ends when motion drops or the next whistle sounds. The whistle is optional: rec games usually have none, so motion is the primary signal there.
 Evaluate with precision and recall on rally boundaries, using a ±1–2 second tolerance. Aim for roughly 85% or better before moving on.
 
 Phase 3: Scoreboard OCR + momentum (≈ 1 week)
+
+Note: scoreboard OCR is a broadcast-only extra. For the primary footage (rec games, no scoreboard), momentum comes from a manual "who won this rally" tap in the viewer, built with the Phase 4 viewer.
 
 Run OCR inside the user's box, sampling at each rally's end.
 Add sanity logic: scores only increase by 0 or 1 per rally, and they reset between sets. This fixes most OCR misreads.
