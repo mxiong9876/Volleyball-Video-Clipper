@@ -140,3 +140,20 @@ def test_cli_motion_errors_without_video(tmp_path):
          "--detector", "motion"]
     )  # fmt: skip
     assert code == 1
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH")
+def test_cli_motion_detector_writes_occlusions(tmp_path):
+    raw = tmp_path / "raw"
+    _motion_clip(raw / "aaaaaaaaaaa" / "video.mp4")
+    out = tmp_path / "pred"
+    code = segment.main(
+        ["--raw", str(raw), "--out", str(out), "--run", "m1", "--detector", "motion"]
+    )  # fmt: skip
+    assert code == 0
+    run_dir = out / "m1"
+    # the pattern starts and ends with cuts, so it stays motion, not an occlusion
+    assert json.loads((run_dir / "aaaaaaaaaaa.occlusions.json").read_text()) == []
+    stats = json.loads((run_dir / "aaaaaaaaaaa.motion.json").read_text())
+    assert stats["occlusions"] == 0 and stats["rallies"] == 1
+    assert json.loads((run_dir / "_run.json").read_text())["occ_min_frac"] == 0.15

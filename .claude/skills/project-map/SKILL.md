@@ -76,13 +76,13 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   another run's)
 - `pipeline/volley_pipeline/plots.py` - motion run diagnostic PNGs (matplotlib, dev-only, imported
   lazily): `<id>_timeline.png` (energy strips, labels colored matched/wrong boundary/no overlap,
-  short labels hatched, predictions, cuts), `<id>_aligned.png` (`aligned_profiles` at label
+  short labels hatched, predictions, cuts, occlusions from <id>.occlusions.json), `<id>_aligned.png` (`aligned_profiles` at label
   start/end); prints short-vs-missed counts; CLI writes <run>/plots/
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
   consecutive whistles), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
   runs every non-held-out data/raw/<id>/audio.wav (or video.mp4) and writes
   data/predictions/<run>/<id>.json (labels format), _run.json, plus <id>.whistles.json (whistle)
-  or <id>.cuts.json + <id>.motion.json (motion)
+  or <id>.cuts.json + <id>.occlusions.json + <id>.motion.json (motion)
 - `pipeline/volley_pipeline/motion.py` - motion energy: `iter_gray_frames` (ffmpeg pipe, 5 fps,
   160x90 gray), `pair_signals` (per-pair energy, histogram distance, changed-pixel fraction;
   `frame_signals` = first two), `detect_cuts` (hist change + lone energy spike), `mask_cuts`,

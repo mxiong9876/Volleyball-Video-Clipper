@@ -6,7 +6,8 @@ For every scored video with predictions in the run dir, writes to <run>/plots/:
   scaled to its own p20..p95) and the smoothed normalized energy the detector thresholds
   (dark), with the hi/lo lines; labels in a lane (green matched, orange overlapped but wrong
   boundaries, red no overlapping prediction; hatched if shorter than SHORT_SEC); predictions
-  in a lane below; camera cuts as ticks along the top.
+  in a lane below; camera cuts as ticks along the top; occlusions (from <id>.occlusions.json,
+  masked like the detector does) as grey bands along the top.
 - <id>_aligned.png: normalized energy around every label start and every label end
   (median + IQR), the shape a boundary rule would key on.
 
@@ -40,7 +41,13 @@ ALIGN_WINDOW = (-5.0, 5.0)
 Y_RANGE = (-1.0, 2.4)  # normalized energy is clipped to the plot; lanes sit below 0
 LABEL_LANE = (-0.55, 0.25)  # (y, height)
 PRED_LANE = (-0.9, 0.25)
-COLORS = {"matched": "#2e9e44", "boundary": "#f09a1a", "missed": "#d62728", "pred": "#1f63b4"}
+COLORS = {
+    "matched": "#2e9e44",
+    "boundary": "#f09a1a",
+    "missed": "#d62728",
+    "pred": "#1f63b4",
+    "occlusion": "#777777",
+}
 
 
 @dataclass
@@ -109,6 +116,7 @@ def plot_timeline(
     title: str,
     strip_sec: float = STRIP_SEC,
     short: float = SHORT_SEC,
+    occlusions_sec: Sequence[Rally] = (),
 ) -> None:
     import matplotlib
 
@@ -148,6 +156,12 @@ def plot_timeline(
         for c in cuts_sec:
             if x0 <= c <= x1:
                 ax.plot([c, c], [Y_RANGE[1] - 0.25, Y_RANGE[1]], color="#7a3fa0", lw=0.8)
+        ax.broken_barh(
+            [(s, e - s) for s, e in occlusions_sec if e >= x0 and s <= x1],
+            (Y_RANGE[1] - 0.5, 0.5),
+            facecolor=COLORS["occlusion"],
+            alpha=0.6,
+        )
         ax.set_xlim(x0, x1)
         ax.set_ylim(*Y_RANGE)
         ax.set_yticks([0, lo, hi, 1, 2])
@@ -162,11 +176,12 @@ def plot_timeline(
             Patch(facecolor="white", edgecolor="black", hatch="////", label=f"label < {short:g} s"),
             Patch(color=COLORS["pred"], label="prediction (lower lane)"),
             Patch(color="#7a3fa0", label="camera cut (top ticks)"),
+            Patch(color=COLORS["occlusion"], alpha=0.6, label="occlusion, masked (top band)"),
         ],
         loc="lower right",
         bbox_to_anchor=(1.0, 1.0),
         fontsize=7,
-        ncol=6,
+        ncol=7,
         frameon=False,
     )
     fig.suptitle(
@@ -225,6 +240,7 @@ def _run_params(pred_dir: Path) -> dict:
         "cut_hist_thresh": motion.CUT_HIST_THRESH,
         "cut_spike_ratio": motion.CUT_SPIKE_RATIO,
         "cut_pad": motion.CUT_PAD,
+        "occ_pad": motion.OCC_PAD,
         "smooth_sec": motion.SMOOTH_SEC,
         "hi": motion.HI,
         "lo": motion.LO,
@@ -246,10 +262,11 @@ def plot_video(
     params: dict,
     tolerance: float = DEFAULT_TOLERANCE,
     short: float = SHORT_SEC,
+    occlusions_sec: Sequence[Rally] = (),
 ) -> tuple[ShortMisses, int]:
     """Write both plots for one video; returns (short-miss counts, number of cuts)."""
     p = params
-    sig = motion.compute_motion(video_path, p["fps"], tuple(p["size"]))
+    sig = motion.compute_motion(video_path, p["fps"], tuple(p["size"]), need_changed=False)
     cuts = motion.detect_cuts(
         sig.hist_dist,
         sig.energy,
@@ -258,6 +275,8 @@ def plot_video(
         spike_ratio=p["cut_spike_ratio"],
     )
     masked = motion.mask_cuts(sig.energy, cuts, sig.fps, pad=p["cut_pad"])
+    occ_runs = [(round(s * sig.fps), round(e * sig.fps) - 1) for s, e in occlusions_sec]
+    masked = motion.mask_occlusions(masked, occ_runs, sig.fps, pad=p["occ_pad"])
     scale = {"floor_q": p["floor_q"], "peak_q": p["peak_q"]}
     norm = motion.normalized_energy(masked, sig.fps, smooth_sec=p["smooth_sec"], **scale)
     raw = motion.normalized_energy(masked, sig.fps, smooth_sec=0, **scale)
@@ -277,6 +296,7 @@ def plot_video(
         lo=p["lo"],
         title=vid,
         short=short,
+        occlusions_sec=occlusions_sec,
     )
     plot_aligned(
         out_dir / f"{vid}_aligned.png",
@@ -316,6 +336,15 @@ def main(argv: list[str] | None = None) -> int:
             pred_path = pred_dir / f"{vid}.json"
             if vid in held_out or not pred_path.exists():
                 continue
+            occ_path = pred_dir / f"{vid}.occlusions.json"
+            occlusions = (
+                [
+                    (float(o["start_sec"]), float(o["end_sec"]))
+                    for o in json.loads(occ_path.read_text())
+                ]
+                if occ_path.exists()
+                else []
+            )
             sm, n_cuts = plot_video(
                 raw_dir / vid / VIDEO_FILENAME,
                 load_rallies(label_path),
@@ -325,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
                 params,
                 args.tolerance,
                 args.short,
+                occlusions,
             )
             rows.append((vid, sm, n_cuts))
     except (OSError, ValueError, KeyError, motion.MotionError) as exc:
