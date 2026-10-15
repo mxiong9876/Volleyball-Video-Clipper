@@ -200,3 +200,113 @@ def test_normalized_energy_scales_to_floor_and_peak():
 def test_normalized_energy_none_when_flat_or_empty():
     assert motion.normalized_energy(np.zeros(50, dtype=np.float32), FPS) is None
     assert motion.normalized_energy(np.zeros(0, dtype=np.float32), FPS) is None
+
+
+# --- changed fraction + occlusions -----------------------------------------------------------
+
+PLAYERS = [(20, 15), (50, 40), (80, 20), (110, 45), (135, 25), (65, 60)]  # (x, y) of small players
+
+
+def court_frame(k, players=PLAYERS, size=(14, 6), step=3):
+    """Flat background with small bright players shifting `step` px back and forth each frame."""
+    f = gray(60)
+    h, w = size
+    for x, y in players:
+        x += step * (k % 2)
+        f[y : y + h, x : x + w] = 200
+    return f
+
+
+def court_clip(seconds, blob_at=None, blob_sec=2.0, blob_w=70):
+    """Court frames; optionally a full-height dark blob crossing left to right from `blob_at` s."""
+    frames = []
+    for k in range(int(seconds * FPS)):
+        f = court_frame(k)
+        t = k / FPS
+        if blob_at is not None and blob_at <= t < blob_at + blob_sec:
+            x = round(-blob_w + (t - blob_at) / blob_sec * (W + blob_w))
+            f[:, max(0, x) : max(0, x + blob_w)] = 10
+        frames.append(f)
+    return frames
+
+
+def test_changed_fraction_counts_pixels_above_noise():
+    _, _, changed = motion.pair_signals([gray(100)] * 3)
+    assert changed.max() == 0
+    _, _, changed = motion.pair_signals([square_at(10), square_at(60)])  # moved clear of itself
+    assert changed[0] == pytest.approx(2 * 400 / (H * W))
+    _, _, changed = motion.pair_signals([gray(100), gray(100 + motion.PIXEL_NOISE - 1)])
+    assert changed[0] == 0
+
+
+def test_frame_signals_matches_pair_signals():
+    frames = [square_at(x) for x in (10, 20, 30, 40)]
+    energy, hist = motion.frame_signals(frames)
+    e2, h2, changed = motion.pair_signals(frames)
+    assert np.array_equal(energy, e2) and np.array_equal(hist, h2) and len(changed) == 3
+
+
+def test_large_blob_crossing_is_flagged():
+    _, _, changed = motion.pair_signals(court_clip(40, blob_at=20.0))
+    occ = motion.detect_occlusions(changed, FPS)
+    assert len(occ) == 1
+    (a, b) = occ[0]
+    assert 19.0 <= a / FPS <= 21.0 and 21.0 <= (b + 1) / FPS <= 23.0
+
+
+def test_small_moving_players_are_not_flagged():
+    _, _, changed = motion.pair_signals(court_clip(40))
+    assert changed.max() > 0 and changed.max() < motion.OCC_MIN_FRAC
+    assert motion.detect_occlusions(changed, FPS) == []
+
+
+def test_burst_of_near_side_players_is_not_flagged():
+    # two far players all along; four bigger near-side players sprint for 2 s at t = 20 s
+    far, near = PLAYERS[:2], [(10, 50), (50, 55), (90, 50), (130, 55)]
+    frames = []
+    for k in range(int(40 * FPS)):
+        f = court_frame(k, far)
+        if 20.0 <= k / FPS < 22.0:
+            f2 = court_frame(k, near, size=(30, 12), step=5)
+            f = np.where(f2 != 60, f2, f)
+        frames.append(f)
+    _, _, changed = motion.pair_signals(frames)
+    level = motion.occlusion_level(changed, FPS)
+    burst = slice(int(20.2 * FPS), int(21.8 * FPS))
+    assert (changed[burst] > motion.OCC_RATIO * level[burst]).all()  # far above local level...
+    assert changed.max() < motion.OCC_MIN_FRAC  # ...but a small share of the frame
+    assert motion.detect_occlusions(changed, FPS) == []
+
+
+def test_long_high_stretch_and_cuts_are_not_occlusions():
+    x = np.full(int(60 * FPS), 0.03, dtype=np.float32)
+    x[100:110] = 0.4  # 2 s: occlusion
+    x[200:230] = 0.4  # 6 s: too long
+    assert motion.detect_occlusions(x, FPS) == [(100, 109)]
+    assert motion.detect_occlusions(x, FPS, cuts=[105]) == []
+
+
+def test_mask_occlusions_fills_from_surroundings():
+    energy = np.full(100, 0.02, dtype=np.float32)
+    energy[40:50] = 0.5
+    out = motion.mask_occlusions(energy, [(40, 49)], FPS, pad=2)
+    assert np.allclose(out[38:52], 0.02)
+    assert np.array_equal(out[:38], energy[:38]) and np.array_equal(out[52:], energy[52:])
+    assert energy[45] == pytest.approx(0.5)  # input not modified
+
+
+@needs_ffmpeg
+def test_cache_stores_changed_frac_and_upgrades_old_caches(tmp_path):
+    clip = make_clip(tmp_path / "video.mp4")
+    sig = motion.compute_motion(clip)
+    cache = motion.cache_path(clip)
+    with np.load(cache) as z:
+        assert np.array_equal(z["changed_frac"], sig.changed_frac)
+    # rewrite as a pre-changed_frac cache
+    np.savez(cache, energy=sig.energy, hist_dist=sig.hist_dist, fps=np.float64(5.0))
+    old = motion.compute_motion(clip, need_changed=False)
+    assert old.changed_frac is None and np.array_equal(old.energy, sig.energy)
+    upgraded = motion.compute_motion(clip)
+    assert np.array_equal(upgraded.changed_frac, sig.changed_frac)
+    with np.load(cache) as z:
+        assert "changed_frac" in z.files

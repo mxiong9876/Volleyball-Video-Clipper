@@ -7,15 +7,21 @@ downscaled to small grayscale images. Each consecutive pair of frames gives two 
   (compression noise). Players moving, the ball, and camera pans all raise it.
 - hist_dist: half the L1 distance between the frames' gray histograms (0..1). Motion and
   pans barely change the histogram; a cut to another shot does.
+- changed_frac: share of pixels changing by at least PIXEL_NOISE (0..1). Small players
+  moving change a few percent of the frame; someone walking in front of the camera changes
+  a large share of it.
 
 A cut is a pair with a large histogram change whose energy is also a lone spike against
 the surrounding second. Cuts are reported separately and masked out of the energy, so
-broadcast cuts don't count as motion. A rally is a stretch where the smoothed energy,
-scaled to the video's own floor (p20) and peak (p95), rises above `hi` and stays above
-`lo` (hysteresis), with short dips bridged and min/max duration limits.
+broadcast cuts don't count as motion. An occlusion (someone walking in front of the camera)
+is a short stretch where changed_frac is far above its local level and covers a large share
+of the frame; occlusions are reported and masked the same way. A rally is a stretch where
+the smoothed energy, scaled to the video's own floor (p20) and peak (p95), rises above `hi`
+and stays above `lo` (hysteresis), with short dips bridged and min/max duration limits.
 
 Pair i ends at frame i + 1, i.e. at time (i + 1) / fps. The per-video signal is cached
-next to the video (motion_<fps>fps_<w>x<h>.npz). Print one video's signal summary + cuts:
+next to the video (motion_<fps>fps_<w>x<h>.npz; caches written before changed_frac existed
+are re-decoded and rewritten when it's needed). Print one video's signal summary + cuts:
 
     uv run python -m volley_pipeline.motion ../data/raw/<youtube_id>/video.mp4
 """
@@ -29,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import uniform_filter1d
+from scipy.ndimage import median_filter, uniform_filter1d
 
 from volley_pipeline.eval import Rally
 
@@ -40,6 +46,11 @@ HIST_BINS = 32
 CUT_HIST_THRESH = 0.35
 CUT_SPIKE_RATIO = 3.0
 CUT_PAD = 1  # pairs masked on each side of a cut
+OCC_RATIO = 4.0  # changed_frac this many times its local level...
+OCC_MIN_FRAC = 0.15  # ...and at least this share of the frame changing...
+OCC_MAX_SEC = 4.0  # ...for at most this long is an occlusion
+OCC_LOCAL_SEC = 10.0  # half-window of the local level (rolling median)
+OCC_PAD = 2  # pairs masked on each side of an occlusion
 SMOOTH_SEC = 1.0
 HI = 0.5  # start threshold, as a fraction of the floor -> peak range
 LO = 0.3  # continue threshold
@@ -60,6 +71,7 @@ class MotionSignal:
     energy: np.ndarray  # float32, one value per consecutive frame pair
     hist_dist: np.ndarray  # float32, same length
     fps: float
+    changed_frac: np.ndarray | None = None  # float32, same length; None if loaded without it
 
 
 def iter_gray_frames(
@@ -108,10 +120,11 @@ def _hist(frame: np.ndarray) -> np.ndarray:
     return counts / frame.size
 
 
-def frame_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
-    """(energy, hist_dist) per consecutive frame pair; both length n_frames - 1."""
+def pair_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(energy, hist_dist, changed_frac) per consecutive frame pair; all length n_frames - 1."""
     energy: list[float] = []
     hist_dist: list[float] = []
+    changed: list[float] = []
     prev: np.ndarray | None = None
     prev_hist: np.ndarray | None = None
     for frame in frames:
@@ -122,8 +135,15 @@ def frame_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray]
             diff[diff < PIXEL_NOISE] = 0
             energy.append(float(diff.mean()) / 255)
             hist_dist.append(0.5 * float(np.abs(cur_hist - prev_hist).sum()))
+            changed.append(float(np.count_nonzero(diff)) / diff.size)
         prev, prev_hist = cur, cur_hist
-    return np.asarray(energy, dtype=np.float32), np.asarray(hist_dist, dtype=np.float32)
+    return tuple(np.asarray(x, dtype=np.float32) for x in (energy, hist_dist, changed))
+
+
+def frame_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """(energy, hist_dist) per consecutive frame pair; both length n_frames - 1."""
+    energy, hist_dist, _ = pair_signals(frames)
+    return energy, hist_dist
 
 
 def _local_median(x: np.ndarray, i: int, half: int, keep: np.ndarray | None = None) -> float:
@@ -160,6 +180,70 @@ def mask_cuts(
     half = max(1, round(fps))
     for i in np.flatnonzero(~keep):
         out[i] = _local_median(energy, int(i), half, keep)
+    return out
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Inclusive (start, end) index runs where mask is True."""
+    edges = np.diff(np.r_[0, mask.astype(np.int8), 0])
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1) - 1
+    return list(zip(starts.tolist(), ends.tolist(), strict=True))
+
+
+def occlusion_level(
+    changed_frac: np.ndarray, fps: float = FPS, local_sec: float = OCC_LOCAL_SEC
+) -> np.ndarray:
+    """Local level of changed_frac: rolling median over ±local_sec, floored at the video median."""
+    x = np.asarray(changed_frac, dtype=np.float64)
+    if len(x) == 0:
+        return x
+    local = median_filter(x, size=2 * max(1, round(local_sec * fps)) + 1, mode="nearest")
+    return np.maximum(local, np.median(x))
+
+
+def detect_occlusions(
+    changed_frac: np.ndarray,
+    fps: float = FPS,
+    cuts: Iterable[int] = (),
+    *,
+    ratio: float = OCC_RATIO,
+    min_frac: float = OCC_MIN_FRAC,
+    max_sec: float = OCC_MAX_SEC,
+    local_sec: float = OCC_LOCAL_SEC,
+    cut_pad: int = CUT_PAD,
+) -> list[tuple[int, int]]:
+    """Inclusive pair-index runs where changed_frac is > ratio x its local level and
+    >= min_frac, lasting at most max_sec; runs touching a cut (± cut_pad) are left to the cut."""
+    x = np.asarray(changed_frac, dtype=np.float64)
+    if len(x) == 0:
+        return []
+    level = occlusion_level(x, fps, local_sec)
+    high = (x > ratio * np.maximum(level, 1e-9)) & (x >= min_frac)
+    near_cut = np.zeros(len(x), dtype=bool)
+    for c in cuts:
+        near_cut[max(0, c - cut_pad) : c + cut_pad + 1] = True
+    return [
+        (a, b)
+        for a, b in _runs(high)
+        if (b - a + 1) / fps <= max_sec and not near_cut[a : b + 1].any()
+    ]
+
+
+def mask_occlusions(
+    energy: np.ndarray, runs: Iterable[tuple[int, int]], fps: float = FPS, pad: int = OCC_PAD
+) -> np.ndarray:
+    """Copy of energy with each run (± pad pairs) replaced by the median of the unmasked samples
+    in the second before and the second after it."""
+    out = np.asarray(energy, dtype=np.float32).copy()
+    n = len(out)
+    keep = np.ones(n, dtype=bool)
+    for a, b in runs:
+        keep[max(0, a - pad) : b + pad + 1] = False
+    half = max(1, round(fps))
+    for a, b in _runs(~keep):
+        context = np.r_[np.arange(max(0, a - half), a), np.arange(b + 1, min(n, b + 1 + half))]
+        context = context[keep[context]]
+        out[a : b + 1] = float(np.median(energy[context])) if len(context) else 0.0
     return out
 
 
@@ -239,19 +323,31 @@ def cache_path(video_path: str | Path, fps: float = FPS, size: tuple[int, int] =
 
 
 def compute_motion(
-    video_path: str | Path, fps: float = FPS, size: tuple[int, int] = SIZE, cache: bool = True
+    video_path: str | Path,
+    fps: float = FPS,
+    size: tuple[int, int] = SIZE,
+    cache: bool = True,
+    need_changed: bool = True,
 ) -> MotionSignal:
-    """Signal for a video, read from / written to the cache next to it."""
+    """Signal for a video, read from / written to the cache next to it.
+
+    A cache without changed_frac (written before it existed) is re-decoded and rewritten when
+    need_changed, else loaded with changed_frac=None.
+    """
     path = cache_path(video_path, fps, size)
     if cache and path.is_file():
         with np.load(path) as z:
-            return MotionSignal(z["energy"], z["hist_dist"], float(z["fps"]))
-    energy, hist_dist = frame_signals(iter_gray_frames(video_path, fps, size))
-    sig = MotionSignal(energy, hist_dist, fps)
+            changed = z["changed_frac"] if "changed_frac" in z.files else None
+            if changed is not None or not need_changed:
+                return MotionSignal(z["energy"], z["hist_dist"], float(z["fps"]), changed)
+    energy, hist_dist, changed = pair_signals(iter_gray_frames(video_path, fps, size))
+    sig = MotionSignal(energy, hist_dist, fps, changed)
     if cache:
         tmp = path.with_name(path.stem + ".tmp.npz")
         with open(tmp, "wb") as f:
-            np.savez(f, energy=energy, hist_dist=hist_dist, fps=np.float64(fps))
+            np.savez(
+                f, energy=energy, hist_dist=hist_dist, changed_frac=changed, fps=np.float64(fps)
+            )
         tmp.replace(path)
     return sig
 
@@ -268,14 +364,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     cuts = detect_cuts(sig.hist_dist, sig.energy, sig.fps)
-    rallies = motion_to_rallies(mask_cuts(sig.energy, cuts, sig.fps), sig.fps)
+    occlusions = detect_occlusions(sig.changed_frac, sig.fps, cuts)
+    energy = mask_occlusions(mask_cuts(sig.energy, cuts, sig.fps), occlusions, sig.fps)
+    rallies = motion_to_rallies(energy, sig.fps)
     q = np.percentile(sig.energy, [20, 50, 95]) if len(sig.energy) else [0, 0, 0]
     print(
         f"{len(sig.energy) + 1} frames at {sig.fps:g} fps; energy p20/p50/p95 "
-        f"{q[0]:.4f}/{q[1]:.4f}/{q[2]:.4f}; {len(cuts)} cuts; {len(rallies)} rallies"
+        f"{q[0]:.4f}/{q[1]:.4f}/{q[2]:.4f}; {len(cuts)} cuts; {len(occlusions)} occlusions; "
+        f"{len(rallies)} rallies"
     )
     for c in cuts:
         print(f"cut at {(c + 1) / sig.fps:8.1f}s  hist_dist {sig.hist_dist[c]:.2f}")
+    for a, b in occlusions:
+        print(
+            f"occlusion {a / sig.fps:8.1f}s - {(b + 1) / sig.fps:8.1f}s  "
+            f"peak changed {sig.changed_frac[a : b + 1].max():.0%}"
+        )
     return 0
 
 
