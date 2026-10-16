@@ -10,18 +10,23 @@ downscaled to small grayscale images. Each consecutive pair of frames gives two 
 - changed_frac: share of pixels changing by at least PIXEL_NOISE (0..1). Small players
   moving change a few percent of the frame; someone walking in front of the camera changes
   a large share of it.
+- largest_blob: share of the frame covered by the biggest connected region of changed pixels
+  (the mask is dilated by BLOB_DILATE px first so one body is one region; only changed pixels
+  are counted). Rally motion is many small regions; a walker is one big one, even when they
+  are far enough from the lens that the total changed share stays modest.
 
 A cut is a pair with a large histogram change whose energy is also a lone spike against
 the surrounding second. Cuts are reported separately and masked out of the energy, so
 broadcast cuts don't count as motion. An occlusion (someone walking in front of the camera)
-is a short stretch where changed_frac is far above its local level and covers a large share
-of the frame; occlusions are reported and masked the same way. A rally is a stretch where
+is a short stretch where largest_blob covers at least OCC_BLOB_MIN of the frame; occlusions
+are reported and masked the same way. A rally is a stretch where
 the smoothed energy, scaled to the video's own floor (p20) and peak (p95), rises above `hi`
 and stays above `lo` (hysteresis), with short dips bridged and min/max duration limits.
 
 Pair i ends at frame i + 1, i.e. at time (i + 1) / fps. The per-video signal is cached
-next to the video (motion_<fps>fps_<w>x<h>.npz; caches written before changed_frac existed
-are re-decoded and rewritten when it's needed). Print one video's signal summary + cuts:
+next to the video (motion_<fps>fps_<w>x<h>.npz; caches written before changed_frac or
+largest_blob existed are re-decoded and rewritten when they're needed). Print one video's
+signal summary + cuts:
 
     uv run python -m volley_pipeline.motion ../data/raw/<youtube_id>/video.mp4
 """
@@ -35,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import median_filter, uniform_filter1d
+from scipy.ndimage import binary_dilation, label, median_filter, uniform_filter1d
 
 from volley_pipeline.eval import Rally
 
@@ -46,8 +51,10 @@ HIST_BINS = 32
 CUT_HIST_THRESH = 0.35
 CUT_SPIKE_RATIO = 3.0
 CUT_PAD = 1  # pairs masked on each side of a cut
-OCC_RATIO = 4.0  # changed_frac this many times its local level...
-OCC_MIN_FRAC = 0.15  # ...and at least this share of the frame changing...
+OCC_RATIO = 4.0  # v1 rule (detect_occlusions): changed_frac this many times its local level...
+OCC_MIN_FRAC = 0.15  # ...and at least this share of the frame changing
+BLOB_DILATE = 2  # 3x3 dilation steps linking changed pixels into one blob (gaps <= 4 px)
+OCC_BLOB_MIN = 0.175  # largest blob at least this share of the frame (leave-one-out)...
 OCC_MAX_SEC = 4.0  # ...for at most this long is an occlusion
 OCC_LOCAL_SEC = 10.0  # half-window of the local level (rolling median)
 OCC_PAD = 2  # pairs masked on each side of an occlusion
@@ -72,6 +79,7 @@ class MotionSignal:
     hist_dist: np.ndarray  # float32, same length
     fps: float
     changed_frac: np.ndarray | None = None  # float32, same length; None if loaded without it
+    largest_blob: np.ndarray | None = None  # float32, same length; None if loaded without it
 
 
 def iter_gray_frames(
@@ -120,11 +128,29 @@ def _hist(frame: np.ndarray) -> np.ndarray:
     return counts / frame.size
 
 
-def pair_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(energy, hist_dist, changed_frac) per consecutive frame pair; all length n_frames - 1."""
+_BLOB_STRUCT = np.ones((3, 3), dtype=bool)
+
+
+def largest_blob_frac(changed: np.ndarray, dilate: int = BLOB_DILATE) -> float:
+    """Share of the frame covered by the changed pixels of the biggest connected blob, with
+    blobs found on the mask dilated `dilate` times (3x3) so nearby pixels join one blob."""
+    changed = np.asarray(changed, dtype=bool)
+    if not changed.any():
+        return 0.0
+    linked = binary_dilation(changed, _BLOB_STRUCT, iterations=dilate) if dilate > 0 else changed
+    labels, _ = label(linked, structure=_BLOB_STRUCT)
+    return float(np.bincount(labels[changed]).max()) / changed.size
+
+
+def all_pair_signals(
+    frames: Iterable[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """(energy, hist_dist, changed_frac, largest_blob) per consecutive frame pair; all length
+    n_frames - 1."""
     energy: list[float] = []
     hist_dist: list[float] = []
     changed: list[float] = []
+    blob: list[float] = []
     prev: np.ndarray | None = None
     prev_hist: np.ndarray | None = None
     for frame in frames:
@@ -136,8 +162,15 @@ def pair_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray, 
             energy.append(float(diff.mean()) / 255)
             hist_dist.append(0.5 * float(np.abs(cur_hist - prev_hist).sum()))
             changed.append(float(np.count_nonzero(diff)) / diff.size)
+            blob.append(largest_blob_frac(diff > 0))
         prev, prev_hist = cur, cur_hist
-    return tuple(np.asarray(x, dtype=np.float32) for x in (energy, hist_dist, changed))
+    return tuple(np.asarray(x, dtype=np.float32) for x in (energy, hist_dist, changed, blob))
+
+
+def pair_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(energy, hist_dist, changed_frac) per consecutive frame pair; all length n_frames - 1."""
+    energy, hist_dist, changed, _ = all_pair_signals(frames)
+    return energy, hist_dist, changed
 
 
 def frame_signals(frames: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
@@ -225,6 +258,30 @@ def detect_occlusions(
     return [
         (a, b)
         for a, b in _runs(high)
+        if (b - a + 1) / fps <= max_sec and not near_cut[a : b + 1].any()
+    ]
+
+
+def detect_blob_occlusions(
+    largest_blob: np.ndarray,
+    fps: float = FPS,
+    cuts: Iterable[int] = (),
+    *,
+    min_blob: float = OCC_BLOB_MIN,
+    max_sec: float = OCC_MAX_SEC,
+    cut_pad: int = CUT_PAD,
+) -> list[tuple[int, int]]:
+    """Inclusive pair-index runs where largest_blob >= min_blob, lasting at most max_sec; runs
+    touching a cut (± cut_pad) are left to the cut."""
+    x = np.asarray(largest_blob, dtype=np.float64)
+    if len(x) == 0:
+        return []
+    near_cut = np.zeros(len(x), dtype=bool)
+    for c in cuts:
+        near_cut[max(0, c - cut_pad) : c + cut_pad + 1] = True
+    return [
+        (a, b)
+        for a, b in _runs(x >= min_blob)
         if (b - a + 1) / fps <= max_sec and not near_cut[a : b + 1].any()
     ]
 
@@ -331,22 +388,28 @@ def compute_motion(
 ) -> MotionSignal:
     """Signal for a video, read from / written to the cache next to it.
 
-    A cache without changed_frac (written before it existed) is re-decoded and rewritten when
-    need_changed, else loaded with changed_frac=None.
+    A cache without changed_frac or largest_blob (written before they existed) is re-decoded
+    and rewritten when need_changed, else loaded with the missing ones as None.
     """
     path = cache_path(video_path, fps, size)
     if cache and path.is_file():
         with np.load(path) as z:
             changed = z["changed_frac"] if "changed_frac" in z.files else None
-            if changed is not None or not need_changed:
-                return MotionSignal(z["energy"], z["hist_dist"], float(z["fps"]), changed)
-    energy, hist_dist, changed = pair_signals(iter_gray_frames(video_path, fps, size))
-    sig = MotionSignal(energy, hist_dist, fps, changed)
+            blob = z["largest_blob"] if "largest_blob" in z.files else None
+            if (changed is not None and blob is not None) or not need_changed:
+                return MotionSignal(z["energy"], z["hist_dist"], float(z["fps"]), changed, blob)
+    energy, hist_dist, changed, blob = all_pair_signals(iter_gray_frames(video_path, fps, size))
+    sig = MotionSignal(energy, hist_dist, fps, changed, blob)
     if cache:
         tmp = path.with_name(path.stem + ".tmp.npz")
         with open(tmp, "wb") as f:
             np.savez(
-                f, energy=energy, hist_dist=hist_dist, changed_frac=changed, fps=np.float64(fps)
+                f,
+                energy=energy,
+                hist_dist=hist_dist,
+                changed_frac=changed,
+                largest_blob=blob,
+                fps=np.float64(fps),
             )
         tmp.replace(path)
     return sig
@@ -364,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     cuts = detect_cuts(sig.hist_dist, sig.energy, sig.fps)
-    occlusions = detect_occlusions(sig.changed_frac, sig.fps, cuts)
+    occlusions = detect_blob_occlusions(sig.largest_blob, sig.fps, cuts)
     energy = mask_occlusions(mask_cuts(sig.energy, cuts, sig.fps), occlusions, sig.fps)
     rallies = motion_to_rallies(energy, sig.fps)
     q = np.percentile(sig.energy, [20, 50, 95]) if len(sig.energy) else [0, 0, 0]
@@ -378,7 +441,8 @@ def main(argv: list[str] | None = None) -> int:
     for a, b in occlusions:
         print(
             f"occlusion {a / sig.fps:8.1f}s - {(b + 1) / sig.fps:8.1f}s  "
-            f"peak changed {sig.changed_frac[a : b + 1].max():.0%}"
+            f"peak blob {sig.largest_blob[a : b + 1].max():.0%}, "
+            f"changed {sig.changed_frac[a : b + 1].max():.0%}"
         )
     return 0
 

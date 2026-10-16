@@ -84,22 +84,25 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   data/predictions/<run>/<id>.json (labels format), _run.json, plus <id>.whistles.json (whistle)
   or <id>.cuts.json + <id>.occlusions.json + <id>.motion.json (motion)
 - `pipeline/volley_pipeline/motion.py` - motion energy: `iter_gray_frames` (ffmpeg pipe, 5 fps,
-  160x90 gray), `pair_signals` (per-pair energy, histogram distance, changed-pixel fraction;
-  `frame_signals` = first two), `detect_cuts` (hist change + lone energy spike), `mask_cuts`,
-  `detect_occlusions` (changed fraction > ratio x local level (`occlusion_level`) and >= min share
-  of frame, short, not at a cut: people walking in front of the camera), `mask_occlusions`,
+  160x90 gray), `all_pair_signals` (per-pair energy, histogram distance, changed-pixel fraction,
+  `largest_blob_frac`: biggest connected changed region after a small dilation; `pair_signals` =
+  first three, `frame_signals` = first two), `detect_cuts` (hist change + lone energy spike),
+  `mask_cuts`, `detect_blob_occlusions` (largest blob >= OCC_BLOB_MIN of frame, short, not at a
+  cut: people walking in front of the camera; used by the detector), `detect_occlusions` (v1
+  rule: changed fraction > ratio x `occlusion_level` and >= min share; kept, unused),
+  `mask_occlusions`,
   `active_runs`/`motion_to_rallies` (smoothed, scaled to video's p20..p95 via `normalized_energy`,
   hysteresis hi/lo, bridge, min/max), `compute_motion` (cache
-  data/raw/<id>/motion_<fps>fps_<w>x<h>.npz; old caches without the `changed_frac` key are
-  re-decoded when needed); CLI prints one video's summary + cuts + occlusions
+  data/raw/<id>/motion_<fps>fps_<w>x<h>.npz; old caches without the `changed_frac` or
+  `largest_blob` key are re-decoded when needed); CLI prints one video's summary + cuts + occlusions
 - `pipeline/volley_pipeline/videos.py` - `held_out_ids` (parses the Split column of
   docs/videos.md), `default_videos_doc` (data/<x> -> docs/videos.md), `load_held_out` (CLI helper)
 - `pipeline/tests/test_smoke.py` - import smoke test
 - `pipeline/tests/test_eval.py` - eval tests on hand-made rally lists (tolerance edges, offsets, CLI)
 - `pipeline/tests/test_audio.py` - whistle detection on synthetic tones/trills/noise (no real media)
 - `pipeline/tests/test_motion.py` - motion on synthetic frames/energy arrays (incl. occlusion: big
-  blob crossing flagged, small/near-side players not); reader + cache (+ upgrade) on a generated
-  ffmpeg clip
+  blob crossing flagged, small/near-side players not; largest blob: one big region flagged, many
+  small ones of the same area not); reader + cache (+ upgrades) on a generated ffmpeg clip
 - `pipeline/tests/test_plots.py` - aligned profiles, short-miss counts, CLI smoke (fake cache)
 - `pipeline/tests/test_diagnose.py` - diagnose smoke test (CLI + whistle and boundary buckets on
   tiny hand-made runs)

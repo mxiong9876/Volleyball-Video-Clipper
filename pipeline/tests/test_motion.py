@@ -310,3 +310,105 @@ def test_cache_stores_changed_frac_and_upgrades_old_caches(tmp_path):
     assert np.array_equal(upgraded.changed_frac, sig.changed_frac)
     with np.load(cache) as z:
         assert "changed_frac" in z.files
+
+
+# --- largest connected changed region + blob-size occlusions -------------------------------
+
+
+def blocks_mask(rows, cols, block, gap):
+    """rows x cols grid of `block` px squares, `gap` px apart (top-left at 2, 2)."""
+    m = np.zeros((H, W), dtype=bool)
+    for r in range(rows):
+        for c in range(cols):
+            y, x = 2 + r * (block + gap), 2 + c * (block + gap)
+            m[y : y + block, x : x + block] = True
+    return m
+
+
+def test_largest_blob_frac_one_blob_vs_many_small():
+    one = np.zeros((H, W), dtype=bool)
+    one[10:50, 20:68] = True  # 40 x 48
+    many = blocks_mask(8, 15, 4, 2 * motion.BLOB_DILATE + 2)  # 120 4 x 4 squares, same area
+    assert one.sum() == many.sum() == 1920
+    assert motion.largest_blob_frac(one) == pytest.approx(1920 / (H * W))
+    assert motion.largest_blob_frac(many) == pytest.approx(16 / (H * W))
+    assert motion.largest_blob_frac(np.zeros((H, W), dtype=bool)) == 0
+
+
+def test_largest_blob_frac_links_nearby_pixels_without_adding_area():
+    m = np.zeros((H, W), dtype=bool)
+    m[10:30, 10:20] = True  # two halves of one body, 3 px apart
+    m[10:30, 23:33] = True
+    assert motion.largest_blob_frac(m) == pytest.approx(400 / (H * W))
+    assert motion.largest_blob_frac(m, dilate=0) == pytest.approx(200 / (H * W))
+
+
+def blob_clip(seconds, at, dur, many):
+    """Court frames; from `at` s for `dur` s, either one 40 x 70 region or 112 scattered 5 x 5
+    squares (same area) flicker between dark and bright every frame."""
+    region = blocks_mask(8, 14, 5, 2 * motion.BLOB_DILATE + 2) if many else np.zeros((H, W), bool)
+    if not many:
+        region[20:60, 45:115] = True
+    frames = []
+    for k in range(int(seconds * FPS)):
+        f = court_frame(k)
+        if at <= k / FPS < at + dur:
+            f[region] = 10 if k % 2 else 240
+        frames.append(f)
+    return frames
+
+
+def test_one_large_blob_is_flagged():
+    _, _, changed, blob = motion.all_pair_signals(blob_clip(40, 20.0, 2.0, many=False))
+    assert blob.max() >= motion.OCC_BLOB_MIN
+    occ = motion.detect_blob_occlusions(blob, FPS)
+    assert len(occ) == 1
+    (a, b) = occ[0]
+    assert 19.0 <= a / FPS <= 21.0 and 21.0 <= (b + 1) / FPS <= 23.0
+
+
+def test_many_small_blobs_with_same_area_are_not_flagged():
+    _, _, big_changed, _ = motion.all_pair_signals(blob_clip(40, 20.0, 2.0, many=False))
+    _, _, changed, blob = motion.all_pair_signals(blob_clip(40, 20.0, 2.0, many=True))
+    assert changed.max() == pytest.approx(big_changed.max(), rel=0.1)  # same changed share
+    assert blob.max() < motion.OCC_BLOB_MIN
+    assert motion.detect_blob_occlusions(blob, FPS) == []
+
+
+def test_blob_occlusions_respect_max_sec_and_cuts():
+    x = np.full(int(60 * FPS), 0.005, dtype=np.float32)
+    x[100:110] = 0.5  # 2 s: occlusion
+    x[200:230] = 0.5  # 6 s: too long
+    assert motion.detect_blob_occlusions(x, FPS, min_blob=0.1) == [(100, 109)]
+    assert motion.detect_blob_occlusions(x, FPS, cuts=[105], min_blob=0.1) == []
+
+
+def test_pair_signals_matches_all_pair_signals():
+    frames = court_clip(4, blob_at=1.0)
+    e, h, c = motion.pair_signals(frames)
+    e2, h2, c2, blob = motion.all_pair_signals(frames)
+    assert np.array_equal(e, e2) and np.array_equal(h, h2) and np.array_equal(c, c2)
+    assert len(blob) == len(c) and (blob <= c + 1e-6).all()
+
+
+@needs_ffmpeg
+def test_cache_stores_largest_blob_and_upgrades_caches_without_it(tmp_path):
+    clip = make_clip(tmp_path / "video.mp4")
+    sig = motion.compute_motion(clip)
+    cache = motion.cache_path(clip)
+    with np.load(cache) as z:
+        assert np.array_equal(z["largest_blob"], sig.largest_blob)
+    # rewrite as a v1 cache: changed_frac but no largest_blob
+    np.savez(
+        cache,
+        energy=sig.energy,
+        hist_dist=sig.hist_dist,
+        changed_frac=sig.changed_frac,
+        fps=np.float64(5.0),
+    )
+    old = motion.compute_motion(clip, need_changed=False)
+    assert old.largest_blob is None and np.array_equal(old.changed_frac, sig.changed_frac)
+    upgraded = motion.compute_motion(clip)
+    assert np.array_equal(upgraded.largest_blob, sig.largest_blob)
+    with np.load(cache) as z:
+        assert "largest_blob" in z.files
