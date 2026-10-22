@@ -13,13 +13,14 @@ downscaled to small grayscale images. Each consecutive pair of frames gives two 
 - largest_blob: share of the frame covered by the biggest connected region of changed pixels
   (the mask is dilated by BLOB_DILATE px first so one body is one region; only changed pixels
   are counted). Rally motion is many small regions; a walker is one big one, even when they
-  are far enough from the lens that the total changed share stays modest.
+  are far enough from the lens that the total changed share stays modest. Computed and cached
+  as a feature; the detector doesn't use it.
 
 A cut is a pair with a large histogram change whose energy is also a lone spike against
 the surrounding second. Cuts are reported separately and masked out of the energy, so
 broadcast cuts don't count as motion. An occlusion (someone walking in front of the camera)
-is a short stretch where largest_blob covers at least OCC_BLOB_MIN of the frame; occlusions
-are reported and masked the same way. A rally is a stretch where
+is a short stretch where changed_frac is far above its local level and covers a large share
+of the frame; occlusions are reported and masked the same way. A rally is a stretch where
 the smoothed energy, scaled to the video's own floor (p20) and peak (p95), rises above `hi`
 and stays above `lo` (hysteresis), with short dips bridged and min/max duration limits.
 
@@ -51,13 +52,12 @@ HIST_BINS = 32
 CUT_HIST_THRESH = 0.35
 CUT_SPIKE_RATIO = 3.0
 CUT_PAD = 1  # pairs masked on each side of a cut
-OCC_RATIO = 4.0  # v1 rule (detect_occlusions): changed_frac this many times its local level...
-OCC_MIN_FRAC = 0.15  # ...and at least this share of the frame changing
-BLOB_DILATE = 2  # 3x3 dilation steps linking changed pixels into one blob (gaps <= 4 px)
-OCC_BLOB_MIN = 0.175  # largest blob at least this share of the frame (leave-one-out)...
+OCC_RATIO = 4.0  # changed_frac this many times its local level...
+OCC_MIN_FRAC = 0.15  # ...and at least this share of the frame changing...
 OCC_MAX_SEC = 4.0  # ...for at most this long is an occlusion
 OCC_LOCAL_SEC = 10.0  # half-window of the local level (rolling median)
 OCC_PAD = 2  # pairs masked on each side of an occlusion
+BLOB_DILATE = 2  # largest_blob feature: 3x3 dilation steps linking changed pixels (gaps <= 4 px)
 SMOOTH_SEC = 1.0
 HI = 0.5  # start threshold, as a fraction of the floor -> peak range
 LO = 0.3  # continue threshold
@@ -262,30 +262,6 @@ def detect_occlusions(
     ]
 
 
-def detect_blob_occlusions(
-    largest_blob: np.ndarray,
-    fps: float = FPS,
-    cuts: Iterable[int] = (),
-    *,
-    min_blob: float = OCC_BLOB_MIN,
-    max_sec: float = OCC_MAX_SEC,
-    cut_pad: int = CUT_PAD,
-) -> list[tuple[int, int]]:
-    """Inclusive pair-index runs where largest_blob >= min_blob, lasting at most max_sec; runs
-    touching a cut (± cut_pad) are left to the cut."""
-    x = np.asarray(largest_blob, dtype=np.float64)
-    if len(x) == 0:
-        return []
-    near_cut = np.zeros(len(x), dtype=bool)
-    for c in cuts:
-        near_cut[max(0, c - cut_pad) : c + cut_pad + 1] = True
-    return [
-        (a, b)
-        for a, b in _runs(x >= min_blob)
-        if (b - a + 1) / fps <= max_sec and not near_cut[a : b + 1].any()
-    ]
-
-
 def mask_occlusions(
     energy: np.ndarray, runs: Iterable[tuple[int, int]], fps: float = FPS, pad: int = OCC_PAD
 ) -> np.ndarray:
@@ -427,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     cuts = detect_cuts(sig.hist_dist, sig.energy, sig.fps)
-    occlusions = detect_blob_occlusions(sig.largest_blob, sig.fps, cuts)
+    occlusions = detect_occlusions(sig.changed_frac, sig.fps, cuts)
     energy = mask_occlusions(mask_cuts(sig.energy, cuts, sig.fps), occlusions, sig.fps)
     rallies = motion_to_rallies(energy, sig.fps)
     q = np.percentile(sig.energy, [20, 50, 95]) if len(sig.energy) else [0, 0, 0]
@@ -441,8 +417,8 @@ def main(argv: list[str] | None = None) -> int:
     for a, b in occlusions:
         print(
             f"occlusion {a / sig.fps:8.1f}s - {(b + 1) / sig.fps:8.1f}s  "
-            f"peak blob {sig.largest_blob[a : b + 1].max():.0%}, "
-            f"changed {sig.changed_frac[a : b + 1].max():.0%}"
+            f"peak changed {sig.changed_frac[a : b + 1].max():.0%}, "
+            f"blob {sig.largest_blob[a : b + 1].max():.0%}"
         )
     return 0
 

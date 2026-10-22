@@ -312,7 +312,7 @@ def test_cache_stores_changed_frac_and_upgrades_old_caches(tmp_path):
         assert "changed_frac" in z.files
 
 
-# --- largest connected changed region + blob-size occlusions -------------------------------
+# --- largest connected changed region (feature) -------------------------------------------
 
 
 def blocks_mask(rows, cols, block, gap):
@@ -341,46 +341,6 @@ def test_largest_blob_frac_links_nearby_pixels_without_adding_area():
     m[10:30, 23:33] = True
     assert motion.largest_blob_frac(m) == pytest.approx(400 / (H * W))
     assert motion.largest_blob_frac(m, dilate=0) == pytest.approx(200 / (H * W))
-
-
-def blob_clip(seconds, at, dur, many):
-    """Court frames; from `at` s for `dur` s, either one 40 x 70 region or 112 scattered 5 x 5
-    squares (same area) flicker between dark and bright every frame."""
-    region = blocks_mask(8, 14, 5, 2 * motion.BLOB_DILATE + 2) if many else np.zeros((H, W), bool)
-    if not many:
-        region[20:60, 45:115] = True
-    frames = []
-    for k in range(int(seconds * FPS)):
-        f = court_frame(k)
-        if at <= k / FPS < at + dur:
-            f[region] = 10 if k % 2 else 240
-        frames.append(f)
-    return frames
-
-
-def test_one_large_blob_is_flagged():
-    _, _, changed, blob = motion.all_pair_signals(blob_clip(40, 20.0, 2.0, many=False))
-    assert blob.max() >= motion.OCC_BLOB_MIN
-    occ = motion.detect_blob_occlusions(blob, FPS)
-    assert len(occ) == 1
-    (a, b) = occ[0]
-    assert 19.0 <= a / FPS <= 21.0 and 21.0 <= (b + 1) / FPS <= 23.0
-
-
-def test_many_small_blobs_with_same_area_are_not_flagged():
-    _, _, big_changed, _ = motion.all_pair_signals(blob_clip(40, 20.0, 2.0, many=False))
-    _, _, changed, blob = motion.all_pair_signals(blob_clip(40, 20.0, 2.0, many=True))
-    assert changed.max() == pytest.approx(big_changed.max(), rel=0.1)  # same changed share
-    assert blob.max() < motion.OCC_BLOB_MIN
-    assert motion.detect_blob_occlusions(blob, FPS) == []
-
-
-def test_blob_occlusions_respect_max_sec_and_cuts():
-    x = np.full(int(60 * FPS), 0.005, dtype=np.float32)
-    x[100:110] = 0.5  # 2 s: occlusion
-    x[200:230] = 0.5  # 6 s: too long
-    assert motion.detect_blob_occlusions(x, FPS, min_blob=0.1) == [(100, 109)]
-    assert motion.detect_blob_occlusions(x, FPS, cuts=[105], min_blob=0.1) == []
 
 
 def test_pair_signals_matches_all_pair_signals():

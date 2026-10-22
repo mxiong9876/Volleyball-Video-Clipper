@@ -4,8 +4,8 @@ Whistle: a rally runs from one whistle (serve) to the next (point over). Whistle
 `dedupe` s are one blow; pairing is greedy, and a gap longer than `max_rally` means the open
 whistle was a stray (timeout, sub, missed end whistle) and the next whistle starts over.
 Motion: active stretches of frame-difference energy with camera cuts and occlusions (people
-walking in front of the camera: one large connected changed region) masked out (see
-volley_pipeline.motion). Run a detector on every video in data/raw with:
+walking in front of the camera) masked out (see volley_pipeline.motion). Run a detector on
+every video in data/raw with:
 
     uv run python -m volley_pipeline.segment --raw ../data/raw --out ../data/predictions \
         --run <run_name> [--detector motion]
@@ -17,8 +17,6 @@ import sys
 from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
-
-import numpy as np
 
 from volley_pipeline import audio, motion, videos
 from volley_pipeline.eval import Rally
@@ -82,7 +80,7 @@ def run_motion_video(video_path: Path, out_dir: Path, youtube_id: str, cache: bo
     .occlusions.json, .motion.json."""
     sig = motion.compute_motion(video_path, cache=cache)
     cuts = motion.detect_cuts(sig.hist_dist, sig.energy, sig.fps)
-    occlusions = motion.detect_blob_occlusions(sig.largest_blob, sig.fps, cuts)
+    occlusions = motion.detect_occlusions(sig.changed_frac, sig.fps, cuts)
     energy = motion.mask_occlusions(
         motion.mask_cuts(sig.energy, cuts, sig.fps), occlusions, sig.fps
     )
@@ -94,13 +92,12 @@ def run_motion_video(video_path: Path, out_dir: Path, youtube_id: str, cache: bo
         [{"t_sec": round((c + 1) / sig.fps, 2), "hist_dist": round(float(sig.hist_dist[c]), 3)}
          for c in cuts],
     )  # fmt: skip
-    level = np.maximum(motion.occlusion_level(sig.largest_blob, sig.fps), 1e-9)
+    level = motion.occlusion_level(sig.changed_frac, sig.fps)
     _write_json(
         out_dir / f"{youtube_id}.occlusions.json",
         [{"start_sec": round(a / sig.fps, 2), "end_sec": round((b + 1) / sig.fps, 2),
-          "peak_blob": round(float(sig.largest_blob[a : b + 1].max()), 3),
           "peak_frac": round(float(sig.changed_frac[a : b + 1].max()), 3),
-          "blob_ratio": round(float((sig.largest_blob[a : b + 1] / level[a : b + 1]).max()), 1)}
+          "peak_ratio": round(float((sig.changed_frac[a : b + 1] / level[a : b + 1]).max()), 1)}
          for a, b in occlusions],
     )  # fmt: skip
     stats = {
@@ -142,8 +139,6 @@ def _run_params(detector: str) -> dict:
         "cut_pad": motion.CUT_PAD,
         "occ_ratio": motion.OCC_RATIO,
         "occ_min_frac": motion.OCC_MIN_FRAC,
-        "occ_blob_min": motion.OCC_BLOB_MIN,
-        "blob_dilate": motion.BLOB_DILATE,
         "occ_max_sec": motion.OCC_MAX_SEC,
         "occ_local_sec": motion.OCC_LOCAL_SEC,
         "occ_pad": motion.OCC_PAD,
