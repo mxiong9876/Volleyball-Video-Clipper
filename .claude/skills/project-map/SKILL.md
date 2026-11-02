@@ -32,25 +32,33 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `api/app/main.py` - FastAPI app, CORS, `/health` (checks Postgres + Redis, 503 if down)
 - `api/app/db.py` - SQLAlchemy `Base`, cached `get_engine()`, `SessionLocal()`, `get_session`/`SessionDep`
 - `api/app/models.py` - `Video` (unique youtube_id), `AnalysisJob` (table analysis_jobs),
+  `Rally` (table rallies; unique video + source + rally_index; source = detector name or "label"),
   `JobStatus` StrEnum (VARCHAR + CHECK constraint, not a PG enum), `TERMINAL_STATUSES`,
   `UTCDateTime` (timestamps always read back tz-aware)
 - `api/alembic.ini`, `api/migrations/env.py` - Alembic; URL from app.config unless set explicitly
-- `api/migrations/versions/` - migrations (`0001` = videos + analysis_jobs)
+- `api/migrations/versions/` - migrations (`0001` = videos + analysis_jobs, `0002` = rallies +
+  detecting_rallies status; CHECK changes are hand-written, autogenerate can't see them)
 - `api/app/config.py` - env-driven settings (DATABASE_URL, REDIS_URL, CORS_ORIGINS, DATA_DIR)
   plus limits: MAX_DURATION_SEC (3h), METADATA_TIMEOUT, QUEUE_NAME, INGEST_JOB_TIMEOUT
 - `api/app/queue.py` - Redis/RQ queue, `enqueue_ingest` (RQ id `ingest-<job_id>`),
   worker heartbeat key (30s TTL), `rq_job_is_live` (waiting, or started on a worker whose
   heartbeat is fresh; RQ's own worker registry outlives a kill -9 by hours)
-- `api/app/tasks.py` - `ingest_video(job_id)` (calls volley_pipeline.ingest, updates status/
-  progress), `fail_stale_jobs`, `mark_failed`
+- `api/app/rallies.py` - `replace_rallies` (swap one source's rows for a video; caller commits)
+- `api/app/cli.py` - `python -m app.cli`: `import-labels` (data/labels -> source="label"), `detect`
+  (current detector on downloaded videos, no job)
+- `api/app/tasks.py` - `ingest_video(job_id)` (volley_pipeline.ingest, then detectors.CURRENT,
+  stores rallies; updates status/progress), `fail_stale_jobs`, `mark_failed`
 - `api/app/routes/videos.py` - POST /videos: parse id -> reuse/retry existing -> lookup (deadline)
-  -> 3h check -> insert + enqueue. 202 new, 200 existing, 422 bad/unavailable/too long, 503, 504
+  -> 3h check -> insert + enqueue. 202 new, 200 existing, 422 bad/unavailable/too long, 503, 504.
+  GET /videos (newest first, `latest_job`), GET /videos/{id}/rallies (`?source=`; `detector` = CURRENT)
 - `api/app/routes/jobs.py` - GET /jobs/{id} (`JobOut`), 404 if missing
 - `api/worker.py` - RQ SimpleWorker entry point; runs `fail_stale_jobs` first, heartbeat thread
 - `api/tests/test_health.py` - /health ok + degraded cases (checks monkeypatched)
 - `api/tests/test_pipeline_import.py` - proves api can import volley_pipeline
 - `api/tests/test_migrations.py` - upgrade/downgrade on Postgres DB `volley_test` (skips if down)
-- `api/tests/conftest.py` - in-memory SQLite fixtures (`session`, `client`), `add_video` helper
+- `api/tests/conftest.py` - in-memory SQLite fixtures (`session`, `client`), `add_video` helper,
+  autouse `fake_detector`
+- `api/tests/test_rallies.py`, `test_cli.py` - detection stage, rally endpoints, CLI commands
 - `api/tests/test_videos.py`, `test_jobs.py`, `test_tasks.py`, `test_queue.py` - endpoints,
   task status flow + stale-job recovery, RQ liveness (lookup/enqueue/RQ all faked)
 
@@ -79,10 +87,12 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   short labels hatched, predictions, cuts, occlusions from <id>.occlusions.json), `<id>_aligned.png` (`aligned_profiles` at label
   start/end); prints short-vs-missed counts; CLI writes <run>/plots/
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
-  consecutive whistles), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
+  consecutive whistles), `detect_motion` (returns data), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
   runs every non-held-out data/raw/<id>/audio.wav (or video.mp4) and writes
   data/predictions/<run>/<id>.json (labels format), _run.json, plus <id>.whistles.json (whistle)
   or <id>.cuts.json + <id>.occlusions.json + <id>.motion.json (motion)
+- `pipeline/volley_pipeline/detectors.py` - named detectors the app can run: `REGISTRY`
+  (`motion_v1`, `whistle_v0`; media dir -> rallies), `CURRENT` (the one the app uses), `detect`
 - `pipeline/volley_pipeline/motion.py` - motion energy: `iter_gray_frames` (ffmpeg pipe, 5 fps,
   160x90 gray), `all_pair_signals` (per-pair energy, histogram distance, changed-pixel fraction,
   `largest_blob_frac`: biggest connected changed region after a small dilation, cached as a
@@ -107,6 +117,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   tiny hand-made runs)
 - `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs / ffmpeg clips
   (both detectors, held-out skip)
+- `pipeline/tests/test_detectors.py` - registry lookup, whistle_v0, motion_v1 vs the CLI runner's file
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 
@@ -122,11 +133,12 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 ## Data flow
 Built (Phase 1): POST /videos → api validates + looks up metadata → inserts videos +
 analysis_jobs row → enqueues on Redis (RQ) → worker runs volley_pipeline.ingest (download
-→ data/raw/<youtube_id>/video.mp4, audio.wav) and updates status/progress → GET /jobs/{id}.
+→ data/raw/<youtube_id>/video.mp4, audio.wav) and updates status/progress → detectors.CURRENT → rallies table → GET /jobs/{id},
+GET /videos, GET /videos/{id}/rallies.
 Phase 2 (in progress): audio.wav → audio.detect_whistles → segment.whistles_to_rallies, or
 video.mp4 → motion (energy, cuts; cached .npz) → motion_to_rallies → data/predictions/<run>/ →
 eval / diagnose against data/labels.
-Planned: OCR, results in Postgres → web momentum chart + playback.
+Planned: OCR → web momentum chart + playback.
 
 ## Commands
 - `make install` - `uv sync --all-packages` + `npm install` in web/

@@ -15,7 +15,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from volley_pipeline import audio, motion, videos
@@ -75,9 +75,17 @@ def run_whistle_video(audio_path: Path, out_dir: Path, youtube_id: str) -> str:
     return f"{len(whistles)} whistles -> {len(rallies)} rallies"
 
 
-def run_motion_video(video_path: Path, out_dir: Path, youtube_id: str, cache: bool = True) -> str:
-    """Motion signal (cached), cuts, occlusions, rallies -> <id>.json, .cuts.json,
-    .occlusions.json, .motion.json."""
+@dataclass
+class MotionDetection:
+    sig: motion.MotionSignal
+    cuts: list[int]
+    occlusions: list[tuple[int, int]]
+    runs: list[Rally]
+    rallies: list[Rally]
+
+
+def detect_motion(video_path: Path, cache: bool = True) -> MotionDetection:
+    """Motion signal (cached), cuts, occlusions, active runs and the rallies among them."""
     sig = motion.compute_motion(video_path, cache=cache)
     cuts = motion.detect_cuts(sig.hist_dist, sig.energy, sig.fps)
     occlusions = motion.detect_occlusions(sig.changed_frac, sig.fps, cuts)
@@ -86,6 +94,14 @@ def run_motion_video(video_path: Path, out_dir: Path, youtube_id: str, cache: bo
     )
     runs = motion.active_runs(energy, sig.fps)
     rallies = [(s, e) for s, e in runs if MIN_RALLY_SEC <= e - s <= MAX_RALLY_SEC]
+    return MotionDetection(sig, cuts, occlusions, runs, rallies)
+
+
+def run_motion_video(video_path: Path, out_dir: Path, youtube_id: str, cache: bool = True) -> str:
+    """Detect with detect_motion and write <id>.json, .cuts.json, .occlusions.json, .motion.json."""
+    result = detect_motion(video_path, cache=cache)
+    sig, cuts, occlusions = result.sig, result.cuts, result.occlusions
+    runs, rallies = result.runs, result.rallies
     _write_rallies(out_dir / f"{youtube_id}.json", rallies)
     _write_json(
         out_dir / f"{youtube_id}.cuts.json",

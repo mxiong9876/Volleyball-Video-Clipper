@@ -1,7 +1,15 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, TypeDecorator
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -27,6 +35,7 @@ class JobStatus(StrEnum):
     QUEUED = "queued"
     DOWNLOADING = "downloading"
     EXTRACTING_AUDIO = "extracting_audio"
+    DETECTING_RALLIES = "detecting_rallies"
     DONE = "done"
     FAILED = "failed"
 
@@ -53,7 +62,8 @@ class AnalysisJob(Base):
     # VARCHAR + CHECK instead of a native PG enum so later phases can add statuses cheaply.
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'downloading', 'extracting_audio', 'done', 'failed')",
+            "status IN ('queued', 'downloading', 'extracting_audio', 'detecting_rallies', "
+            "'done', 'failed')",
             name="ck_analysis_jobs_status",
         ),
     )
@@ -69,3 +79,17 @@ class AnalysisJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     video: Mapped[Video] = relationship(back_populates="jobs")
+
+
+class Rally(Base):
+    __tablename__ = "rallies"
+    __table_args__ = (UniqueConstraint("video_id", "source", "rally_index"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"))
+    rally_index: Mapped[int]
+    start_sec: Mapped[float]
+    end_sec: Mapped[float]
+    # A name from volley_pipeline.detectors.REGISTRY, or "label" for hand labels.
+    source: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)

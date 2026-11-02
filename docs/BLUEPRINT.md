@@ -140,6 +140,8 @@ Derive set boundaries and point winners from the score changes.
 
 Phase 4: Frontend viewer (≈ 2 weeks)
 
+Note: the viewer is deliberately built before rally detection reaches the Phase 2 target of roughly 85%. It is a debugging tool for the detector, and correction is part of the product.
+
 Build the paste-link page, the scoreboard box selector, the processing screen, and the match overview.
 Add the rally list with the embedded player, continuous mode, the momentum chart with click-to-jump, and filters.
 Add inline correction tools that write to the corrections table.

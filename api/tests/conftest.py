@@ -3,9 +3,36 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from volley_pipeline import detectors
 
 from app import db, models
 from app.main import app
+
+
+class FakeDetector:
+    """Stands in for detectors.detect. Set .rallies, .error or .on_call; .calls records uses."""
+
+    def __init__(self):
+        self.rallies = [(1.0, 5.0), (10.123, 20.456)]
+        self.error = None
+        self.on_call = None
+        self.calls = []
+
+    def __call__(self, name, media_dir):
+        self.calls.append((name, media_dir))
+        if self.on_call:
+            self.on_call()
+        if self.error:
+            raise self.error
+        return self.rallies
+
+
+@pytest.fixture(autouse=True)
+def fake_detector(monkeypatch) -> FakeDetector:
+    """API tests never decode real media; the detectors have their own tests in pipeline/."""
+    fake = FakeDetector()
+    monkeypatch.setattr(detectors, "detect", fake)
+    return fake
 
 
 @pytest.fixture

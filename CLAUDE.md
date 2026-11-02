@@ -34,6 +34,12 @@ and scoreboard OCR is a broadcast-only extra (rec-game momentum comes from a man
   previous worker left mid-processing
 - `make dev` - `up`, then API on :8000 (reload) + worker + Vite on :5173; Ctrl-C stops all
   (the worker doesn't hot-reload: restart `make dev` after changing tasks/pipeline code)
+- `make import-labels` - store data/labels as source="label" rallies; safe to re-run; skips held-out
+  (`cd api && uv run python -m app.cli import-labels --include-held-out` to include them); adds
+  missing videos via a YouTube lookup, with no job
+- `make detect` - run the current detector on all downloaded videos in the DB, without a job (for
+  videos ingested earlier, or after changing `CURRENT`; POST /videos won't re-run a done job). One
+  video: `cd api && uv run python -m app.cli detect <youtube_id>`
 - `make test` - pytest in pipeline/ and api/ (api/tests/test_migrations.py needs
   `make up`; it uses a separate `volley_test` DB and skips if Postgres is down)
 - `make lint` - ruff check + format check (Python), oxlint + tsc (web)
@@ -60,6 +66,7 @@ and scoreboard OCR is a broadcast-only extra (rec-game momentum comes from a man
 - Health: `curl -i localhost:8000/health` (200 ok, 503 if db or redis down)
 - Submit: `curl -X POST localhost:8000/videos -H 'content-type: application/json'
   -d '{"url":"<youtube url>"}'` (202 new, 200 existing), then `curl localhost:8000/jobs/<id>`
+- List: `curl localhost:8000/videos`; rallies: `curl 'localhost:8000/videos/<id>/rallies[?source=label]'`
 
 ## Rules
 - Only work on the phase I ask for. Don't start later phases.
@@ -67,6 +74,8 @@ and scoreboard OCR is a broadcast-only extra (rec-game momentum comes from a man
 - Never commit video/audio files or .env. Test media lives in data/raw/.
 - Any change to rally detection must be scored with the eval script against
   data/labels/ and report precision/recall before and after.
+- Changing a detector's parameters means registering a new name in
+  pipeline/volley_pipeline/detectors.py (the name is stored as rallies.source); the app runs `CURRENT`.
 - Ask before adding a dependency not listed above.
 - Commit after each working step with a clear message.
 - When you add, move, or delete a file in api/, pipeline/, or web/src/, update
