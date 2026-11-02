@@ -60,6 +60,7 @@ and scoreboard OCR is a broadcast-only extra (rec-game momentum comes from a man
 - Health: `curl -i localhost:8000/health` (200 ok, 503 if db or redis down)
 - Submit: `curl -X POST localhost:8000/videos -H 'content-type: application/json'
   -d '{"url":"<youtube url>"}'` (202 new, 200 existing), then `curl localhost:8000/jobs/<id>`
+- List: `curl localhost:8000/videos`; rallies: `curl 'localhost:8000/videos/<id>/rallies[?source=label]'`
 
 ## Rules
 - Only work on the phase I ask for. Don't start later phases.

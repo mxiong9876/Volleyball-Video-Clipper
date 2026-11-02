@@ -5,10 +5,11 @@ from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from volley_pipeline import ingest
+from volley_pipeline import detectors, ingest, motion
 
 from app import config, db, queue
 from app.models import TERMINAL_STATUSES, AnalysisJob, JobStatus, utcnow
+from app.rallies import replace_rallies
 
 log = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ WORKER_STOPPED_MSG = "worker stopped during processing"
 # Share of progress_pct given to the download; audio extraction covers the rest.
 DOWNLOAD_PCT = 80
 EXTRACTING_PCT = 85
+DETECTING_PCT = 90
 
 
 def _update(session: Session, job: AnalysisJob, **fields) -> None:
@@ -52,10 +54,14 @@ def ingest_video(job_id: int) -> None:
             video_path = ingest.download_video(url, out_dir, on_progress=on_progress)
             _update(session, job, status=JobStatus.EXTRACTING_AUDIO, progress_pct=EXTRACTING_PCT)
             ingest.extract_audio(video_path, out_dir / ingest.AUDIO_FILENAME)
+            _update(session, job, status=JobStatus.DETECTING_RALLIES, progress_pct=DETECTING_PCT)
+            rallies = detectors.detect(detectors.CURRENT, out_dir)
+            # Same commit as DONE, so a done job always has its rallies.
+            replace_rallies(session, job.video_id, detectors.CURRENT, rallies)
             _update(session, job, status=JobStatus.DONE, progress_pct=100, finished_at=utcnow())
         except Exception as exc:
             session.rollback()
-            if isinstance(exc, ingest.IngestError):
+            if isinstance(exc, ingest.IngestError | motion.MotionError):
                 msg = str(exc)
             else:
                 msg = f"Internal error: {type(exc).__name__}: {exc}"

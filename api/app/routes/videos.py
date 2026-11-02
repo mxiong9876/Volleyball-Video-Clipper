@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from datetime import datetime
 
 import redis
 import volley_pipeline
@@ -7,12 +8,12 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-from volley_pipeline import ingest
+from sqlalchemy.orm import Session, selectinload
+from volley_pipeline import detectors, ingest
 
 from app import config, queue, tasks
 from app.db import SessionDep
-from app.models import AnalysisJob, JobStatus, Video
+from app.models import AnalysisJob, JobStatus, Rally, Video
 from app.routes.jobs import JobOut
 
 router = APIRouter()
@@ -40,6 +41,26 @@ class VideoOut(BaseModel):
 class SubmitResult(BaseModel):
     video: VideoOut
     job: JobOut
+
+
+class VideoListItem(VideoOut):
+    latest_job: JobOut | None
+
+
+class RallyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rally_index: int
+    start_sec: float
+    end_sec: float
+    source: str
+    created_at: datetime
+
+
+class VideoRallies(BaseModel):
+    video_id: int
+    detector: str  # the source whose rows are the live predictions; others are labels or older runs
+    rallies: list[RallyOut]
 
 
 def _result(video: Video, job: AnalysisJob) -> SubmitResult:
@@ -129,3 +150,34 @@ def submit_video(body: SubmitVideo, response: Response, session: SessionDep) -> 
         video = session.scalar(select(Video).where(Video.youtube_id == youtube_id))
         return _existing(session, video, response)
     return _result(video, _start_job(session, video))
+
+
+@router.get("/videos", response_model=list[VideoListItem])
+def list_videos(session: SessionDep) -> list[VideoListItem]:
+    videos = session.scalars(
+        select(Video)
+        .options(selectinload(Video.jobs))
+        .order_by(Video.created_at.desc(), Video.id.desc())
+    ).all()
+    return [
+        VideoListItem(
+            **VideoOut.model_validate(video).model_dump(),
+            latest_job=JobOut.model_validate(video.jobs[-1]) if video.jobs else None,
+        )
+        for video in videos
+    ]
+
+
+@router.get("/videos/{video_id}/rallies", response_model=VideoRallies)
+def get_rallies(video_id: int, session: SessionDep, source: str | None = None) -> VideoRallies:
+    if session.get(Video, video_id) is None:
+        raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
+    query = select(Rally).where(Rally.video_id == video_id)
+    if source is not None:
+        query = query.where(Rally.source == source)
+    rallies = session.scalars(query.order_by(Rally.source, Rally.rally_index)).all()
+    return VideoRallies(
+        video_id=video_id,
+        detector=detectors.CURRENT,
+        rallies=[RallyOut.model_validate(r) for r in rallies],
+    )
