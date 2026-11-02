@@ -79,10 +79,12 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   short labels hatched, predictions, cuts, occlusions from <id>.occlusions.json), `<id>_aligned.png` (`aligned_profiles` at label
   start/end); prints short-vs-missed counts; CLI writes <run>/plots/
 - `pipeline/volley_pipeline/segment.py` - `whistles_to_rallies` (dedupe, greedy pairing of
-  consecutive whistles), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
+  consecutive whistles), `detect_motion` (returns data), `run_whistle_video`, `run_motion_video`; CLI `--detector whistle|motion`
   runs every non-held-out data/raw/<id>/audio.wav (or video.mp4) and writes
   data/predictions/<run>/<id>.json (labels format), _run.json, plus <id>.whistles.json (whistle)
   or <id>.cuts.json + <id>.occlusions.json + <id>.motion.json (motion)
+- `pipeline/volley_pipeline/detectors.py` - named detectors the app can run: `REGISTRY`
+  (`motion_v1`, `whistle_v0`; media dir -> rallies), `CURRENT` (the one the app uses), `detect`
 - `pipeline/volley_pipeline/motion.py` - motion energy: `iter_gray_frames` (ffmpeg pipe, 5 fps,
   160x90 gray), `all_pair_signals` (per-pair energy, histogram distance, changed-pixel fraction,
   `largest_blob_frac`: biggest connected changed region after a small dilation, cached as a
@@ -107,6 +109,7 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   tiny hand-made runs)
 - `pipeline/tests/test_segment.py` - whistle pairing rules + CLI on generated WAVs / ffmpeg clips
   (both detectors, held-out skip)
+- `pipeline/tests/test_detectors.py` - registry lookup, whistle_v0, motion_v1 vs the CLI runner's file
 - `pipeline/tests/test_videos.py` - videos.md table parsing (held-out ids, malformed rows)
 - `pipeline/tests/test_ingest.py` - ingest tests; yt-dlp faked, ffmpeg run on a generated 1s clip
 

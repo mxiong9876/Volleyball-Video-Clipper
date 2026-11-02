@@ -67,6 +67,8 @@ and scoreboard OCR is a broadcast-only extra (rec-game momentum comes from a man
 - Never commit video/audio files or .env. Test media lives in data/raw/.
 - Any change to rally detection must be scored with the eval script against
   data/labels/ and report precision/recall before and after.
+- Changing a detector's parameters means registering a new name in
+  pipeline/volley_pipeline/detectors.py (the name is stored as rallies.source); the app runs `CURRENT`.
 - Ask before adding a dependency not listed above.
 - Commit after each working step with a clear message.
 - When you add, move, or delete a file in api/, pipeline/, or web/src/, update
