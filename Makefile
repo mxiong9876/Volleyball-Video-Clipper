@@ -1,4 +1,4 @@
-.PHONY: install up down migrate worker dev test lint
+.PHONY: install up down migrate worker dev import-labels detect test lint
 
 install:
 	uv sync --all-packages
@@ -25,6 +25,14 @@ dev: up
 	(cd api && uv run python worker.py) & \
 	(cd web && npm run dev) & \
 	wait
+
+# Replace source="label" rallies from data/labels (held-out skipped).
+import-labels: up
+	cd api && uv run python -m app.cli import-labels
+
+# Run the current detector on every downloaded video in the DB, replacing its rallies.
+detect: up
+	cd api && uv run python -m app.cli detect
 
 test:
 	cd pipeline && uv run pytest

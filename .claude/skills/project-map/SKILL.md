@@ -44,6 +44,8 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
   worker heartbeat key (30s TTL), `rq_job_is_live` (waiting, or started on a worker whose
   heartbeat is fresh; RQ's own worker registry outlives a kill -9 by hours)
 - `api/app/rallies.py` - `replace_rallies` (swap one source's rows for a video; caller commits)
+- `api/app/cli.py` - `python -m app.cli`: `import-labels` (data/labels -> source="label"), `detect`
+  (current detector on downloaded videos, no job)
 - `api/app/tasks.py` - `ingest_video(job_id)` (volley_pipeline.ingest, then detectors.CURRENT,
   stores rallies; updates status/progress), `fail_stale_jobs`, `mark_failed`
 - `api/app/routes/videos.py` - POST /videos: parse id -> reuse/retry existing -> lookup (deadline)
