@@ -32,10 +32,12 @@ and `uv.lock`. The pipeline package is `volley_pipeline` (dist name
 - `api/app/main.py` - FastAPI app, CORS, `/health` (checks Postgres + Redis, 503 if down)
 - `api/app/db.py` - SQLAlchemy `Base`, cached `get_engine()`, `SessionLocal()`, `get_session`/`SessionDep`
 - `api/app/models.py` - `Video` (unique youtube_id), `AnalysisJob` (table analysis_jobs),
+  `Rally` (table rallies; unique video + source + rally_index; source = detector name or "label"),
   `JobStatus` StrEnum (VARCHAR + CHECK constraint, not a PG enum), `TERMINAL_STATUSES`,
   `UTCDateTime` (timestamps always read back tz-aware)
 - `api/alembic.ini`, `api/migrations/env.py` - Alembic; URL from app.config unless set explicitly
-- `api/migrations/versions/` - migrations (`0001` = videos + analysis_jobs)
+- `api/migrations/versions/` - migrations (`0001` = videos + analysis_jobs, `0002` = rallies +
+  detecting_rallies status; CHECK changes are hand-written, autogenerate can't see them)
 - `api/app/config.py` - env-driven settings (DATABASE_URL, REDIS_URL, CORS_ORIGINS, DATA_DIR)
   plus limits: MAX_DURATION_SEC (3h), METADATA_TIMEOUT, QUEUE_NAME, INGEST_JOB_TIMEOUT
 - `api/app/queue.py` - Redis/RQ queue, `enqueue_ingest` (RQ id `ingest-<job_id>`),
